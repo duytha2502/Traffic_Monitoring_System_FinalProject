@@ -3,13 +3,18 @@ from deep_sort_realtime.deepsort_tracker import DeepSort
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from twilio.rest import Client
-from datetime import datetime
+from datetime import datetime, timedelta
+from moviepy.editor import VideoFileClip
+import time
 import http.client
 import json
 import smtplib,ssl
 import cv2
 import imutils
 import numpy as np
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
 import os
 import math
 import cvzone
@@ -41,6 +46,7 @@ def processVideo(video_path, model, class_names):
     vehicle_with_speed_count = 0
 
     frame_counter = 0
+    frames_to_wait = 30 
     update_interval = 10
 
     occupancy_density = 0
@@ -49,7 +55,7 @@ def processVideo(video_path, model, class_names):
     all_speeds = {}
     update_total_avg_speed = 0
 
-    congestion_rate = 91
+    congestion_rate = []
 
     # Initialize frame
     frames = [] 
@@ -172,12 +178,14 @@ def processVideo(video_path, model, class_names):
             if frame_counter % update_interval == 0:
                 update_total_occupancy_density = total_occupancy_density 
                 update_total_avg_speed = total_avg_speed
-                congestion_rate = calculate_congestion(update_total_avg_speed, update_total_occupancy_density)
+                congestion_rate_result = calculate_congestion(update_total_avg_speed, update_total_occupancy_density)
+                congestion_rate.append(congestion_rate_result)
             else:
                 pass
         
         # Check and sending notification
-        check_congestion_and_notify(congestion_rate)
+        # check_congestion_and_notify(congestion_rate, frame_counter, frames_to_wait)
+
         cv2.putText(frame_resized, f'Total Vehicles: {sum(vehicle_count.values())}', (930, 60), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
         cv2.putText(frame_resized, f'Car: {vehicle_count["car"]}', (930, 100), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
         cv2.putText(frame_resized, f'Motorcycle: {vehicle_count["motorcycle"]}', (930, 130), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
@@ -185,7 +193,12 @@ def processVideo(video_path, model, class_names):
         cv2.putText(frame_resized, f'Bus: {vehicle_count["bus"]}', (1140, 130), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2) 
         cv2.putText(frame_resized, f'Average Speed: {update_total_avg_speed:.0f} km/h', (930, 190), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
         cv2.putText(frame_resized, f'Occupancy: {update_total_occupancy_density:.2f} %', (930, 230), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
-        cv2.putText(frame_resized, f'Congestion: {congestion_rate:.2f} %', (930, 280), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
+        
+        if not congestion_rate:
+            cv2.putText(frame_resized, f'Congestion: 0 %', (930, 280), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
+        else:
+            cv2.putText(frame_resized, f'Congestion: {congestion_rate[-1]:.2f} %', (930, 280), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
+        frames.append(frame_resized)
         
         frames.append(frame_resized)
 
@@ -197,7 +210,7 @@ def processVideo(video_path, model, class_names):
     cap.release()
     cv2.destroyAllWindows()
 
-    return frames
+    return frames, vehicle_count, congestion_rate
 
 # Calculate speed based on bounding box centers
 def calculate_speed(prev_center, curr_center, time_interval):
@@ -289,24 +302,24 @@ def draw_metric(image):
     return image
 
 # Send SMS notification
-def send_sms_alert(congestion_rate):
+# def send_sms_alert(congestion_rate):
 
-    account_sid = 'AC88457892b9e22f910fdeeaf0fe6c16d3'
-    auth_token = '41627fe7f6045a8b462aa840476aa085'
-    twilio_number = '+18039982438'
-    recipient_number = '+84788024737'
+#     account_sid = 'AC88457892b9e22f910fdeeaf0fe6c16d3'
+#     auth_token = '41627fe7f6045a8b462aa840476aa085'
+#     twilio_number = '+18039982438'
+#     recipient_number = '+84788024737'
 
-    # Create Twilio client
-    client = Client(account_sid, auth_token)
+#     # Create Twilio client
+#     client = Client(account_sid, auth_token)
 
-    # Send SMS
-    # in body part you have to write your message
-    message = client.messages.create(
-        body= f"The congestion rate has reached {congestion_rate:.2f} %. Immediate action required.",
-        from_=twilio_number,
-        to=recipient_number
-    )
-    print("SMS sent successfully.")
+#     # Send SMS
+#     # in body part you have to write your message
+#     message = client.messages.create(
+#         body= f"The congestion rate has reached {congestion_rate:.2f} %. Immediate action required.",
+#         from_=twilio_number,
+#         to=recipient_number
+#     )
+#     print("SMS sent successfully.")
 
 # Send email alert
 def send_email_alert(congestion_rate):
@@ -337,45 +350,127 @@ def send_email_alert(congestion_rate):
 
 
 # Check congestion rate
-def check_congestion_and_notify(congestion_rate):
-    if congestion_rate >= 90:
-        print("Congestion rate has reached 90%! Sending alert...")
-        # send_email_alert(congestion_rate)
-        send_sms_alert(congestion_rate)
+
+def check_congestion_and_notify(congestion_rate, frame_counter, frames_to_wait):
+    if frame_counter % frames_to_wait == 0:
+        if congestion_rate >= 90:
+            print("Congestion rate has reached 90%! Sending alert...")
+            send_email_alert(congestion_rate)
+            # send_sms_alert(congestion_rate)
+        else:
+            print(f"Congestion rate is {congestion_rate}%. No need to send alert yet.")
     else:
-        print(f"Congestion rate is {congestion_rate}%. No need to send alert yet.")
+        print(f"Congestion rate is {congestion_rate}%, waiting before sending next alert.")
+
+# Draw chart and save
+# Pie chart
+def plot_vehicle_pie_chart(vehicle_count, output_name, output_dir):
+    # Dữ liệu cho biểu đồ
+    labels = list(vehicle_count.keys())  # Các loại phương tiện
+    sizes = list(vehicle_count.values())  # Số lượng phương tiện
+    colors = ['red', 'yellow', 'green', 'blue']
+    explode = (0.1, 0, 0, 0)
+
+    # Vẽ biểu đồ tròn
+    plt.figure(figsize=(7, 7))
+    plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90, explode=explode, shadow = True, textprops={'fontsize': 12})
+    plt.legend(title = "Vehicles:")
+    plt.axis('equal')  # Đảm bảo biểu đồ tròn
+
+    # Tiêu đề cho biểu đồ
+    plt.title("Vehicle radio Pie Chart")
+
+    chart_path = os.path.join(f"{output_dir}", f"{output_name}")
+
+    # Tạo thư mục nếu chưa tồn tại
+    if not os.path.exists(chart_path):
+        os.makedirs(chart_path)
+
+    # Lưu biểu đồ vào thư mục với tên file phù hợp
+    chart_file = os.path.join(f"{chart_path}", f"{output_name}_pie.png")
+    plt.savefig(chart_file)
+
+    # Hiển thị biểu đồ
+    plt.show()
+
+# Line chart
+def plot_congestion_line_chart(congestion_rate, output_name, output_dir):
+    
+    timestamps = np.arange(len(congestion_rate)) * (1/30)
+
+    # Vẽ biểu đồ Line cho congestion rate
+    plt.figure(figsize=(10, 6))
+    plt.plot(timestamps, congestion_rate, color='red', label='Congestion Rate (%)')
+    plt.title('Congestion Rate over Time')
+    plt.xlabel('Time (seconds)')
+    plt.ylabel('Congestion Rate (%)')
+    plt.legend()
+    plt.grid(True)
+
+    # Tiêu đề cho biểu đồ
+    plt.title("Congestion rate Line Chart")
+
+    chart_path = os.path.join(f"{output_dir}", f"{output_name}")
+
+    # Tạo thư mục nếu chưa tồn tại
+    if not os.path.exists(chart_path):
+        os.makedirs(chart_path)
+
+    # Lưu biểu đồ vào thư mục với tên file phù hợp
+    chart_file = os.path.join(f"{chart_path}", f"{output_name}_line.png")
+    plt.savefig(chart_file)
+
+    # Hiển thị biểu đồ
+    plt.show()
+
+# Xvid -> mp4
+def convert_to_mp4(input_file, output_file):
+    # Load video file bằng MoviePy
+    clip = VideoFileClip(input_file)
+    
+    # Lưu file với codec 'libx264' để chuyển sang MP4
+    clip.write_videofile(output_file, codec="libx264")
 
 # Save output
-def save_video(frames, input_video_path, output_video_path):
+def save_processed_video(frames, input_video_path, output_video_path):
 
     base_filename = os.path.basename(input_video_path).split('.')[0]
     timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")
-    output_file = os.path.join(f"{output_video_path}", f"{base_filename}_{timestamp}.avi")
-
+    output_name = f"{base_filename}_{timestamp}"
+    output_file_xvid = os.path.join(f"{output_video_path}",  f"{output_name}.avi")
+    output_file_mp4 = os.path.join(output_video_path, f"{output_name}.mp4")
+    
     fourcc = cv2.VideoWriter_fourcc(*"XVID")
     w, h = 1280, 720
 
-    out = cv2.VideoWriter(output_file, fourcc, 30, (w, h))
+    out = cv2.VideoWriter(output_file_xvid, fourcc, 30, (w, h))
     for frame in frames:
         out.write(frame)
     out.release()
 
+    convert_to_mp4(output_file_xvid, output_file_mp4)
+
+    if os.path.exists(output_file_xvid):
+        os.remove(output_file_xvid)
+
+    return output_file_mp4, output_name
+
 # Main execution
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    # Initialize
-    model = YOLO("models/yolov8x/yolov8x.pt")
-    # model = YOLO("models/yolov8x/best.pt")
-    input_video_path = "input_videos/demo6.mp4"
-    output_video_path = "output_videos"
-    class_file = 'classes_name.txt'
+#     # Initialize
+#     model = YOLO("models/yolov8x/yolov8x.pt")
+#     # model = YOLO("models/yolov8x/best.pt")
+#     input_video_path = "input_videos/demo6.mp4"
+#     output_video_path = "output_videos"
+#     class_file = 'classes_name.txt'
 
-    # Load class names
-    class_names = load_class_names(class_file)
+#     # Load class names
+#     class_names = load_class_names(class_file)
 
-    # Process the video
-    processed_frames = processVideo(input_video_path, model, class_names)
+#     # Process the video
+#     processed_frames = processVideo(input_video_path, model, class_names)
 
-    # Save the processed video
-    save_video(processed_frames, input_video_path, output_video_path)
+#     # Save the processed video
+#     save_video(processed_frames, input_video_path, output_video_path)
 
