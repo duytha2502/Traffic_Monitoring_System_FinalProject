@@ -42,20 +42,17 @@ def processVideo(video_path, model, class_names):
     }
 
     # Initialize for tracking speed and occupancy
-    total_speed = 0
-    vehicle_with_speed_count = 0
-
     frame_counter = 0
     frames_to_wait = 30 
     update_interval = 10
 
     occupancy_density = 0
-    update_total_occupancy_density = 0
+    update_total_occupancy_density = [0]
 
     all_speeds = {}
-    update_total_avg_speed = 0
+    update_total_avg_speed = [0]
 
-    congestion_rate = []
+    congestion_rate = [0]
 
     # Initialize frame
     frames = [] 
@@ -102,8 +99,11 @@ def processVideo(video_path, model, class_names):
         total_frame_area = frame_resized.shape[0] * frame_resized.shape[1]
 
         # Initialize for calculating each frame
-        speeds = {}
         total_occupancy_density = 0
+
+        speeds = {}
+        total_speed = 0
+        vehicle_with_speed_count = 0
         total_avg_speed = 0
 
         for track in tracks[:]:
@@ -174,14 +174,17 @@ def processVideo(video_path, model, class_names):
                 elif class_names[class_id] == "motorbike":
                     vehicle_count["motorbike"] += 1
 
-            # Every 5 frame update the values
-            if frame_counter % update_interval == 0:
-                update_total_occupancy_density = total_occupancy_density 
-                update_total_avg_speed = total_avg_speed
-                congestion_rate_result = calculate_congestion(update_total_avg_speed, update_total_occupancy_density)
-                congestion_rate.append(congestion_rate_result)
-            else:
-                pass
+        # Every 10 frame update the values
+        if frame_counter % update_interval == 0:
+            
+            update_total_occupancy_density.append(total_occupancy_density) 
+            
+            update_total_avg_speed.append(total_avg_speed)
+            
+            congestion_rate_result = calculate_congestion(update_total_avg_speed[-1], update_total_occupancy_density[-1])
+            congestion_rate.append(congestion_rate_result)
+        else:
+            pass
         
         # Check and sending notification
         # check_congestion_and_notify(congestion_rate, frame_counter, frames_to_wait)
@@ -191,14 +194,9 @@ def processVideo(video_path, model, class_names):
         cv2.putText(frame_resized, f'Motorcycle: {vehicle_count["motorcycle"]}', (930, 130), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
         cv2.putText(frame_resized, f'Truck: {vehicle_count["truck"]}', (1140, 100), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
         cv2.putText(frame_resized, f'Bus: {vehicle_count["bus"]}', (1140, 130), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2) 
-        cv2.putText(frame_resized, f'Average Speed: {update_total_avg_speed:.0f} km/h', (930, 190), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
-        cv2.putText(frame_resized, f'Occupancy: {update_total_occupancy_density:.2f} %', (930, 230), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
-        
-        if not congestion_rate:
-            cv2.putText(frame_resized, f'Congestion: 0 %', (930, 280), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
-        else:
-            cv2.putText(frame_resized, f'Congestion: {congestion_rate[-1]:.2f} %', (930, 280), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
-        frames.append(frame_resized)
+        cv2.putText(frame_resized, f'Average Speed: {update_total_avg_speed[-1]:.0f} km/h', (930, 190), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
+        cv2.putText(frame_resized, f'Occupancy: {update_total_occupancy_density[-1]:.2f} %', (930, 230), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
+        cv2.putText(frame_resized, f'Congestion: {congestion_rate[-1]:.2f} %', (930, 280), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
         
         frames.append(frame_resized)
 
@@ -210,7 +208,7 @@ def processVideo(video_path, model, class_names):
     cap.release()
     cv2.destroyAllWindows()
 
-    return frames, vehicle_count, congestion_rate
+    return frames, vehicle_count, congestion_rate, update_total_avg_speed, update_total_occupancy_density
 
 # Calculate speed based on bounding box centers
 def calculate_speed(prev_center, curr_center, time_interval):
@@ -371,32 +369,40 @@ def plot_vehicle_pie_chart(vehicle_count, output_name, output_dir):
     colors = ['red', 'yellow', 'green', 'blue']
     explode = (0.1, 0, 0, 0)
 
+    # Lọc ra các giá trị và labels không bằng 0
+    filtered_labels = [label for label, size in zip(labels, sizes) if size > 0]
+    filtered_sizes = [size for size in sizes if size > 0]
+    filtered_colors = [colors[i] for i, size in enumerate(sizes) if size > 0]
+    filtered_explode = [explode[i] for i, size in enumerate(sizes) if size > 0]
+
     # Vẽ biểu đồ tròn
     plt.figure(figsize=(7, 7))
-    plt.pie(sizes, labels=labels, colors=colors, autopct='%1.1f%%', startangle=90, explode=explode, shadow = True, textprops={'fontsize': 12})
+    plt.pie(filtered_sizes, labels=filtered_labels, colors=filtered_colors, autopct='%1.1f%%', startangle=90, explode=filtered_explode, shadow = True, textprops={'fontsize': 12})
     plt.legend(title = "Vehicles:")
     plt.axis('equal')  # Đảm bảo biểu đồ tròn
 
     # Tiêu đề cho biểu đồ
-    plt.title("Vehicle radio Pie Chart")
+    plt.title("Vehicle Radio Pie Chart", y=1.05)
 
-    chart_path = os.path.join(f"{output_dir}", f"{output_name}")
+    chart_path = os.path.join(output_dir, output_name)
 
     # Tạo thư mục nếu chưa tồn tại
     if not os.path.exists(chart_path):
         os.makedirs(chart_path)
 
     # Lưu biểu đồ vào thư mục với tên file phù hợp
-    chart_file = os.path.join(f"{chart_path}", f"{output_name}_pie.png")
+    chart_file = os.path.join(chart_path, f"{output_name}_pie.png").replace("\\", "/")
     plt.savefig(chart_file)
 
     # Hiển thị biểu đồ
     plt.show()
+    
+    return chart_file
 
 # Line chart
 def plot_congestion_line_chart(congestion_rate, output_name, output_dir):
     
-    timestamps = np.arange(len(congestion_rate)) * (1/30)
+    timestamps = np.arange(len(congestion_rate)) * 0.333
 
     # Vẽ biểu đồ Line cho congestion rate
     plt.figure(figsize=(10, 6))
@@ -410,18 +416,58 @@ def plot_congestion_line_chart(congestion_rate, output_name, output_dir):
     # Tiêu đề cho biểu đồ
     plt.title("Congestion rate Line Chart")
 
-    chart_path = os.path.join(f"{output_dir}", f"{output_name}")
+    chart_path = os.path.join(output_dir, output_name)
 
     # Tạo thư mục nếu chưa tồn tại
     if not os.path.exists(chart_path):
         os.makedirs(chart_path)
 
     # Lưu biểu đồ vào thư mục với tên file phù hợp
-    chart_file = os.path.join(f"{chart_path}", f"{output_name}_line.png")
+    chart_file = os.path.join(chart_path, f"{output_name}_line.png").replace("\\", "/")
     plt.savefig(chart_file)
 
     # Hiển thị biểu đồ
     plt.show()
+
+    return chart_file
+
+# Average speed and occupancy chart
+def plot_asp_ocp_chart(average_speed, occupancy, output_name, output_dir):
+    
+    timestamps = np.arange(len(average_speed)) * 0.333
+
+    fig, ax1 = plt.subplots(figsize=(10, 6))
+
+    # Biểu đồ Line cho tốc độ trung bình
+    ax1.plot(timestamps, average_speed, color='b', label='Average Speed (km/h)', linewidth=2)
+    ax1.set_xlabel('Time (seconds)')
+    ax1.set_ylabel('Average Speed (km/h)', color='b')
+    ax1.tick_params(axis='y', labelcolor='b')
+
+    # Biểu đồ Bar cho occupancy
+    ax2 = ax1.twinx()  # Tạo trục Y kép
+    ax2.plot(timestamps, occupancy, color='r', label='Occupancy (%)', linewidth=2)
+    ax2.set_ylabel('Occupancy (%)', color='r')
+    ax2.tick_params(axis='y', labelcolor='r')
+
+    # Tiêu đề và hiển thị biểu đồ
+    plt.title('Average Speed and Occupancy over Time')
+    fig.tight_layout()
+
+    chart_path = os.path.join(output_dir, output_name)
+
+    # Tạo thư mục nếu chưa tồn tại
+    if not os.path.exists(chart_path):
+        os.makedirs(chart_path)
+
+    # Lưu biểu đồ vào thư mục với tên file phù hợp
+    chart_file = os.path.join(chart_path, f"{output_name}_hybrid.png").replace("\\", "/")
+    plt.savefig(chart_file)
+
+    # Hiển thị biểu đồ
+    plt.show()
+    
+    return chart_file
 
 # Xvid -> mp4
 def convert_to_mp4(input_file, output_file):
@@ -437,7 +483,7 @@ def save_processed_video(frames, input_video_path, output_video_path):
     base_filename = os.path.basename(input_video_path).split('.')[0]
     timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")
     output_name = f"{base_filename}_{timestamp}"
-    output_file_xvid = os.path.join(f"{output_video_path}",  f"{output_name}.avi")
+    output_file_xvid = os.path.join(output_video_path,  f"{output_name}.avi")
     output_file_mp4 = os.path.join(output_video_path, f"{output_name}.mp4")
     
     fourcc = cv2.VideoWriter_fourcc(*"XVID")
