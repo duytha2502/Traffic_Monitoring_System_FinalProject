@@ -303,8 +303,6 @@ def draw_metric(image):
 # Send SMS notification
 def send_sms_alert(congestion_rate):
 
-    account_sid = 'AC88457892b9e22f910fdeeaf0fe6c16d3'
-    auth_token = '41627fe7f6045a8b462aa840476aa085'
     twilio_number = '+18039982438'
     recipient_number = '+84788024737'
 
