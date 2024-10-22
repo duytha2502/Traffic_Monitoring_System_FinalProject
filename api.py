@@ -3,7 +3,7 @@ import os
 from fastapi import FastAPI, File, UploadFile, HTTPException
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
-from main import processVideo, save_processed_video, load_class_names, plot_vehicle_pie_chart, plot_congestion_line_chart, plot_asp_ocp_chart
+from main import processVideo, save_processed_video, load_class_names, plot_vehicle_pie_chart, plot_congestion_line_chart, plot_asp_ocp_chart, save_to_csv
 
 # Khởi tạo FastAPI app
 app = FastAPI()
@@ -25,6 +25,7 @@ class_names = load_class_names(class_file)
 UPLOAD_FOLDER = 'uploads/'
 PROCESSED_FOLDER = 'static/tracked_videos/'
 CHART_FOLDER = 'charts/'
+CSV_FOLDER = 'csv/'
 
 # Kiểm tra và tạo các folder nếu không tồn tại
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -61,9 +62,12 @@ async def track(file: UploadFile = File(...)):
     pie_file_path = plot_vehicle_pie_chart(vehicle_count, output_name, CHART_FOLDER)
     line_file_path = plot_congestion_line_chart(congestion_rate, output_name, CHART_FOLDER)
     asp_ocp_file_path = plot_asp_ocp_chart(average_speed, occupancy, output_name, CHART_FOLDER)
+
+    # Save data to CSV
+    csv_file_path = save_to_csv(average_speed, occupancy, congestion_rate, output_name, CSV_FOLDER)
     
     # Trả về file video đã tracking
-    return {"message": "Tracking completed", "video_url": f"{saved_video}", "pie_url": f"{pie_file_path}", "line_url": f"{line_file_path}", "hybrid_url": f"{asp_ocp_file_path}"}
+    return {"message": "Tracking completed", "video_url": f"{saved_video}", "pie_url": f"{pie_file_path}", "line_url": f"{line_file_path}", "hybrid_url": f"{asp_ocp_file_path}", "csv_url": f"{csv_file_path}"}
 
 # Route để lấy video đã xử lý
 @app.get("/static/tracked_videos/{filename}")
@@ -96,3 +100,14 @@ async def get_chart_from_video(video_folder: str, filename: str):
         return FileResponse(file_path)
     else:
         raise HTTPException(status_code=404, detail="File not found")
+
+@app.get("/csv/{filename}")
+async def download_csv(filename: str):
+    file_path = os.path.join(CSV_FOLDER, filename)
+
+    # Kiểm tra nếu file không tồn tại
+    if not os.path.isfile(file_path):
+        return {"error": "File not found"}
+
+    # Trả về file CSV cho người dùng
+    return FileResponse(path=file_path, filename=filename, media_type='text/csv')
