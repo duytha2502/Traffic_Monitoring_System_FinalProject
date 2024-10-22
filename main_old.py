@@ -88,8 +88,9 @@ def processVideo(video_path, model, class_names):
                 x1, y1, x2, y2 = int(data[0]), int(data[1]), int(data[2]), int(data[3])
                 id = int(data[5])
                 center = calculate_center(x1, y1, x2, y2)
+                
 
-                if is_inside_area((center[0],center[1]), pts):
+                if is_inside_area((center[0],center[1]), pts) or class_names[id] == "traffic light":
                     drawBox(data, frame_resized, class_names[id]) 
                 
             details = get_details(result, frame_resized)
@@ -120,10 +121,11 @@ def processVideo(video_path, model, class_names):
             h = y2 - y1
             bbox_area = w * h  
 
-            if not is_inside_area((x1, y1), pts):
-            # Nếu track nằm ngoài vùng, xoá track này
-                tracks.remove(track)
-                continue
+            if class_names[class_id] != "traffic light":
+                if not is_inside_area((x1, y1), pts):
+                    # Nếu track không phải là đèn tín hiệu và nằm ngoài vùng, xoá track này
+                    tracks.remove(track)
+                    continue
 
             # Calculate % of each bounding box for the total frame size 
             occupancy_density = round((bbox_area/ area) * 100, 2)
@@ -462,6 +464,27 @@ def plot_asp_ocp_chart(average_speed, occupancy, output_name, output_dir):
     # Hiển thị biểu đồ
     plt.show()
 
+# Save to CSV
+def save_to_csv(average_speed, occupancy, congestion_rate, output_file):
+
+    # Kiểm tra độ dài của mảng
+    if not (len(average_speed) == len(occupancy) == len(congestion_rate)):
+        raise ValueError("Các mảng phải có cùng độ dài")
+    
+    # Tạo mảng timestamp với bước nhảy 1/3 giây
+    timestamps = [round(i * 1/3, 2) for i in range(len(average_speed))]
+
+    # Tạo dataframe từ dữ liệu
+    df = pd.DataFrame({
+        'Timestamp':timestamps,
+        'Average Speed (km/h)': [round(speed, 2) for speed in average_speed],
+        'Occupancy (%)': [round(occur, 2) for occur in occupancy],
+        'Congestion Rate (%)': [round(rate, 2) for rate in congestion_rate]
+    })
+    
+    # Ghi dataframe vào file CSV
+    df.to_csv(output_file, index=False)
+
 # Save output
 def save_video(frames, input_video_path, output_video_path):
 
@@ -486,9 +509,10 @@ if __name__ == "__main__":
     # Initialize
     model = YOLO("models/yolov8x/yolov8x.pt")
     # model = YOLO("models/yolov8x/best.pt")
-    input_video_path = "input_videos/demo6.mp4"
+    input_video_path = "input_videos/demo7.mp4"
     output_video_path = "output_videos"
     output_chart_path = "charts"
+    output_csv_path = "csv"
     class_file = 'classes_name.txt'
 
     # Load class names
@@ -504,3 +528,7 @@ if __name__ == "__main__":
     plot_vehicle_pie_chart(vehicle_count, saved_video, output_chart_path)
     plot_congestion_line_chart(congestion_rate, saved_video, output_chart_path)
     plot_asp_ocp_chart(average_speed, occupancy, saved_video, output_chart_path)
+    
+    # Save data to CSV
+    save_to_csv(average_speed, occupancy, congestion_rate, os.path.join(output_csv_path, f"{saved_video}_data.csv"))
+
