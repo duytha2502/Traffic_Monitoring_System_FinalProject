@@ -305,8 +305,6 @@ def draw_metric(image):
 # Send SMS notification
 def send_sms_alert(congestion_rate):
 
-    account_sid = 'AC88457892b9e22f910fdeeaf0fe6c16d3'
-    auth_token = '41627fe7f6045a8b462aa840476aa085'
     twilio_number = '+18039982438'
     recipient_number = '+84788024737'
 
@@ -530,6 +528,7 @@ if __name__ == "__main__":
     plot_vehicle_pie_chart(vehicle_count, saved_video, output_chart_path)
     plot_congestion_line_chart(congestion_rate, saved_video, output_chart_path)
     plot_asp_ocp_chart(average_speed, occupancy, saved_video, output_chart_path)
-
+    
     # Save data to CSV
     save_to_csv(average_speed, occupancy, congestion_rate, os.path.join(output_csv_path, f"{saved_video}_data.csv"))
+
