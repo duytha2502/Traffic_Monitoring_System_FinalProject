@@ -40,6 +40,7 @@ def processVideo(video_path, model, class_names):
         "truck": 0,
         "bus": 0
     }
+    update_vehicle_count = [0]
 
     # Initialize for tracking speed and occupancy
     frame_counter = 0
@@ -208,7 +209,7 @@ def processVideo(video_path, model, class_names):
     cap.release()
     cv2.destroyAllWindows()
 
-    return frames, vehicle_count, congestion_rate, update_total_avg_speed, update_total_occupancy_density
+    return frames, update_vehicle_count, congestion_rate, update_total_avg_speed, update_total_occupancy_density
 
 # Calculate speed based on bounding box centers
 def calculate_speed(prev_center, curr_center, time_interval):
@@ -218,10 +219,12 @@ def calculate_speed(prev_center, curr_center, time_interval):
 
     dx = curr_center[0] - prev_center[0]
     dy = curr_center[1] - prev_center[1]
-    distance_km = math.sqrt(math.pow(dx, 2) + math.pow(dy, 2)) * scale_factor
-    speed_km = (distance_km / time_interval) * 3600
+    distance = math.sqrt(math.pow(dx, 2) + math.pow(dy, 2))
+    distance_km = distance * scale_factor  
+    speed_km = distance_km / time_interval
+    speed_kmh = speed_km * 3600
 
-    return speed_km
+    return speed_kmh
 
 # Calculate congestion
 def calculate_congestion(avg_speed, occupancy):
@@ -302,8 +305,6 @@ def draw_metric(image):
 # Send SMS notification
 # def send_sms_alert(congestion_rate):
 
-#     account_sid = 'AC88457892b9e22f910fdeeaf0fe6c16d3'
-#     auth_token = '41627fe7f6045a8b462aa840476aa085'
 #     twilio_number = '+18039982438'
 #     recipient_number = '+84788024737'
 
@@ -468,6 +469,33 @@ def plot_asp_ocp_chart(average_speed, occupancy, output_name, output_dir):
     plt.show()
     
     return chart_file
+
+# Save to CSV
+def save_to_csv(average_speed, occupancy, congestion_rate, vehicle_count ,output_name, output_dir):
+
+    # Kiểm tra độ dài của mảng
+    if not (len(average_speed) == len(occupancy) == len(congestion_rate) == len(vehicle_count)):
+        raise ValueError("Các mảng phải có cùng độ dài")
+    
+    # Tạo mảng timestamp với bước nhảy 1/3 giây
+    timestamps = [round(i * 1/3, 2) for i in range(len(average_speed))]
+
+    # Tạo dataframe từ dữ liệu
+    df = pd.DataFrame({
+        'Timestamp':timestamps,
+        'Average Speed (km/h)': [round(speed, 2) for speed in average_speed],
+        'Occupancy (%)': [round(occur, 2) for occur in occupancy],
+        'Congestion Rate (%)': [round(rate, 2) for rate in congestion_rate],
+        'Vehicle count': vehicle_count
+    })
+
+    # Lưu file csv
+    csv_file = os.path.join(output_dir, f"{output_name}_data.csv")
+    
+    # Ghi dataframe vào file CSV
+    df.to_csv(csv_file, index=False)
+
+    return csv_file
 
 # Xvid -> mp4
 def convert_to_mp4(input_file, output_file):
