@@ -471,10 +471,10 @@ def plot_asp_ocp_chart(average_speed, occupancy, output_name, output_dir):
     return chart_file
 
 # Save to CSV
-def save_to_csv(average_speed, occupancy, congestion_rate, vehicle_count ,output_name, output_dir):
+def save_to_csv(average_speed, occupancy, congestion_rate, output_name, output_dir):
 
     # Kiểm tra độ dài của mảng
-    if not (len(average_speed) == len(occupancy) == len(congestion_rate) == len(vehicle_count)):
+    if not (len(average_speed) == len(occupancy) == len(congestion_rate)):
         raise ValueError("Các mảng phải có cùng độ dài")
     
     # Tạo mảng timestamp với bước nhảy 1/3 giây
@@ -485,8 +485,7 @@ def save_to_csv(average_speed, occupancy, congestion_rate, vehicle_count ,output
         'Timestamp':timestamps,
         'Average Speed (km/h)': [round(speed, 2) for speed in average_speed],
         'Occupancy (%)': [round(occur, 2) for occur in occupancy],
-        'Congestion Rate (%)': [round(rate, 2) for rate in congestion_rate],
-        'Vehicle count': vehicle_count
+        'Congestion Rate (%)': [round(rate, 2) for rate in congestion_rate]
     })
 
     # Lưu file csv
