@@ -4,6 +4,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from twilio.rest import Client
 from datetime import datetime,  timedelta
+from moviepy.editor import VideoFileClip
 import time
 import http.client
 import json
@@ -24,7 +25,7 @@ def load_class_names(class_file):
         class_names = f.read().splitlines()
     return class_names
 
-def processVideo(video_path, model, class_names):
+def processVideo(video_path, model, class_names, cora, corb, corc, cord):
 
     # Initialize for speed calculation
     prev_centers = {} 
@@ -39,6 +40,7 @@ def processVideo(video_path, model, class_names):
         "bus": 0,
         "motorcycle": 0
     }
+    update_vehicle_count = [0]
 
     # Initialize for tracking speed and occupancy
 
@@ -54,6 +56,8 @@ def processVideo(video_path, model, class_names):
 
     congestion_rate = [0]
 
+    captured_tracks = set()
+
     # Initialize frame
     frames = [] 
 
@@ -61,23 +65,23 @@ def processVideo(video_path, model, class_names):
     cap = cv2.VideoCapture(video_path)
 
     # Initialize Deepsort 
-    object_tracker = DeepSort(max_age= 3, n_init= 1)
+    object_tracker = DeepSort(max_age= 3, n_init= 3)
 
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
             break
-        
+
         frame_counter += 1
+
         # Resize frame
         frame_resized = cv2.resize(frame, (1280, 720))
 
         results = model.predict(frame_resized, stream=True, device='cuda')
 
         # Draw on frame
-        frame_resized, pts = draw_area(frame_resized)
+        frame_resized, pts = draw_area(frame_resized, cora, corb, corc, cord)
         area = polygon_area(pts)
-
         frame_resized = draw_metric(frame_resized)
 
         # detection_classes = results.names
@@ -88,9 +92,8 @@ def processVideo(video_path, model, class_names):
                 x1, y1, x2, y2 = int(data[0]), int(data[1]), int(data[2]), int(data[3])
                 id = int(data[5])
                 center = calculate_center(x1, y1, x2, y2)
-                
 
-                if is_inside_area((center[0],center[1]), pts) or class_names[id] == "traffic light":
+                if is_inside_area((center[0],center[1]), pts):
                     drawBox(data, frame_resized, class_names[id]) 
                 
             details = get_details(result, frame_resized)
@@ -108,7 +111,7 @@ def processVideo(video_path, model, class_names):
         vehicle_with_speed_count = 0
         total_avg_speed = 0
 
-        for track in tracks[:]:
+        for track in tracks:
             if not track.is_confirmed():
                 break
 
@@ -120,62 +123,68 @@ def processVideo(video_path, model, class_names):
             w = x2 - x1 
             h = y2 - y1
             bbox_area = w * h  
+            cx2 = int(x1 + (w/2))
+            cy2 = int(y1 + (h/2))
+            cx1 = int(x1 - (w/2))
+            cy1 = int(y1 - (h/2))
 
-            if class_names[class_id] != "traffic light":
-                if not is_inside_area((x1, y1), pts):
-                    # Nếu track không phải là đèn tín hiệu và nằm ngoài vùng, xoá track này
-                    tracks.remove(track)
-                    continue
-
-            # Calculate % of each bounding box for the total frame size 
-            occupancy_density = round((bbox_area/ area) * 100, 2)
-            total_occupancy_density += occupancy_density
-
-            # Calculate speed if we have the previous center for this object
-            if track_id in prev_centers:
-                prev_center = prev_centers[track_id]
+            if is_inside_area((x1, y1), pts):
                 
-                # Check if object moving
-                if prev_center != (x1, y1):
-                    speed = calculate_speed(prev_center, (x1, y1), time_interval)
+                # Calculate % of each bounding box for the total frame size 
+                occupancy_density = round((bbox_area/ area) * 100, 2)
+                total_occupancy_density += occupancy_density
+
+                # Calculate speed if we have the previous center for this object
+                if track_id in prev_centers:
+                    prev_center = prev_centers[track_id]
+                        
+                    # Check if object moving
+                    if prev_center != (x1, y1):
+                        speed = calculate_speed(prev_center, (x1, y1, w, h), time_interval)
+                    else:
+                        speed = 0
+                    
+                    # Every 5 frame update speed values
+                    if frame_counter % update_interval == 0:
+                        if speed > 80:  # Nếu tốc độ vượt 80 km/h
+                            capture_speeding_object(frame_resized, captured_tracks, track_id, speed, cx1, cy1, cx2, cy2, "captured_objects")  # Chụp hình lại object
+                        speeds[track_id] = speed
+                        all_speeds.update(speeds)
+                    
+                    # Show speed of each track
+                    if track_id in all_speeds:
+                        speed = all_speeds[track_id]
+                        if speed > 80:
+                            cv2.putText(frame_resized, f'BREAK: {speed:.0f} km/h', (cx2 - 4, cy1 - 4), cv2.FONT_HERSHEY_DUPLEX, 0.4, (0, 0, 255), 2)
+                        else:
+                            cv2.putText(frame_resized, f'{speed:.0f} km/h', (cx2 - 4, cy1 - 4), cv2.FONT_HERSHEY_DUPLEX, 0.4, (0, 128, 255), 2)
+
+                    vehicle_with_speed_count += 1
+                    total_speed += speed     
+
+                # Update the center of the object
+                prev_centers[track_id] = (x1, y1, w, h)
+
+                # Calculate average speed
+                if vehicle_with_speed_count > 0:
+                    total_avg_speed = total_speed / vehicle_with_speed_count
                 else:
-                    speed = 0
+                    total_avg_speed = 0
 
-                # Every 5 frame update speed values
-                if frame_counter % update_interval == 0:
-                    speeds[track_id] = speed
-                    all_speeds.update(speeds)
-                else:
-                    pass
-                
-                # Show speed of each track
-                if track_id in all_speeds:
-                    speed = all_speeds[track_id]
-                    cv2.putText(frame_resized, f'{speed:.0f} km/h', (x1, y1), cv2.FONT_HERSHEY_DUPLEX, 0.4, (0, 255, 0), 2)
-
-                vehicle_with_speed_count += 1
-                total_speed += speed
-            
-            # Update the center of the object
-            prev_centers[track_id] = (x1, y1)
-
-            # Calculate average speed
-            if vehicle_with_speed_count > 0:
-                total_avg_speed = total_speed / vehicle_with_speed_count
-            else:
-                total_avg_speed = 0
-
-            # Count each kind of vehicles
-            if y1 > int(pts[-1][0][1] - 10) and track_id not in counter_cache: 
-                counter_cache.append(track_id)          
-                if class_names[class_id] == "car":
-                    vehicle_count["car"] += 1
-                elif class_names[class_id] == "truck":
-                    vehicle_count["truck"] += 1
-                elif class_names[class_id] == "bus":
-                    vehicle_count["bus"] += 1
-                elif class_names[class_id] == "motorbike":
-                    vehicle_count["motorbike"] += 1
+                # Count each kind of vehicles
+                if y1 > int(pts[-1][0][1] - 10) and track_id not in counter_cache: 
+                    counter_cache.append(track_id)          
+                    if class_names[class_id] == "car":
+                        vehicle_count["car"] += 1
+                    elif class_names[class_id] == "truck":
+                        vehicle_count["truck"] += 1
+                    elif class_names[class_id] == "bus":
+                        vehicle_count["bus"] += 1
+                    elif class_names[class_id] == "motorbike":
+                        vehicle_count["motorbike"] += 1
+            else: 
+                tracks.remove(track)
+                continue
 
         # Every 10 frame update the values
         if frame_counter % update_interval == 0:
@@ -186,6 +195,8 @@ def processVideo(video_path, model, class_names):
             
             congestion_rate_result = calculate_congestion(update_total_avg_speed[-1], update_total_occupancy_density[-1])
             congestion_rate.append(congestion_rate_result)
+
+            update_vehicle_count.append(sum(vehicle_count.values()))
         else:
             pass
         
@@ -207,11 +218,11 @@ def processVideo(video_path, model, class_names):
         cv2.imshow('VD', frame_resized)
         if cv2.waitKey(1) == ord("q"):
             break
-
+        
     cap.release()
     cv2.destroyAllWindows()
 
-    return frames, vehicle_count, congestion_rate, update_total_avg_speed, update_total_occupancy_density
+    return frames, update_vehicle_count, congestion_rate, update_total_avg_speed, update_total_occupancy_density
 
 # Calculate speed based on bounding box centers
 def calculate_speed(prev_center, curr_center, time_interval):
@@ -221,10 +232,29 @@ def calculate_speed(prev_center, curr_center, time_interval):
 
     dx = curr_center[0] - prev_center[0]
     dy = curr_center[1] - prev_center[1]
-    distance_km = math.sqrt(math.pow(dx, 2) + math.pow(dy, 2)) * scale_factor
-    speed_km = (distance_km / time_interval) * 3600
 
-    return speed_km
+    distance = math.sqrt(math.pow(dx, 2) + math.pow(dy, 2))
+    distance_km = distance * scale_factor  
+    speed_kms = distance_km / time_interval
+    speed_kmh = speed_kms * 3600
+
+    return speed_kmh
+
+def capture_speeding_object(frame, captured_tracks, track_id, speed, cx1, cy1, cx2, cy2, output_dir):
+
+    if track_id not in captured_tracks:
+        # Cắt hình ảnh vùng bounding box
+        object_img = frame[cy1:cy2, cx1:cx2]
+
+        # Tạo đường dẫn lưu file
+        output_file = os.path.join(output_dir, f"vehicle_{track_id}_{speed:.2f}.png")
+
+        # Lưu hình ảnh object
+        cv2.imwrite(output_file, object_img)
+
+        captured_tracks.add(track_id)
+    else: 
+        pass
 
 # Calculate congestion
 def calculate_congestion(avg_speed, occupancy):
@@ -262,11 +292,20 @@ def get_details(result, frame):
 
     return detections
 
-def draw_area(image):
+def draw_area(image, cora, corb, corc, cord):
 
-    pts = np.array([[590, 350], [810, 350], 
-                    [910, 650], [210, 650]],
+    pts = np.array([[cora], [corb], 
+                    [corc], [cord]],
                     np.int32)
+    # Define a polygon area of demo6.mp4
+    # pts = np.array([[590, 350], [810, 350], 
+    #                 [910, 650], [210, 650]],
+    #                 np.int32)
+
+    # Define a polygon area of demo4_greenlight.mp4
+    # pts = np.array([[190, 300], [650, 300], 
+    #                 [1200, 650], [190, 650]],
+    #                 np.int32)
     
     pts = pts.reshape((-1, 1, 2))
 
@@ -396,7 +435,7 @@ def plot_vehicle_pie_chart(vehicle_count, output_name, output_dir):
     plt.savefig(chart_file)
 
     # Hiển thị biểu đồ
-    plt.show()
+    # plt.show()
 
 # Line chart
 def plot_congestion_line_chart(congestion_rate, output_name, output_dir):
@@ -426,7 +465,7 @@ def plot_congestion_line_chart(congestion_rate, output_name, output_dir):
     plt.savefig(chart_file)
 
     # Hiển thị biểu đồ
-    plt.show()
+    # plt.show()
 
 # Average speed and occupancy chart
 def plot_asp_ocp_chart(average_speed, occupancy, output_name, output_dir):
@@ -462,13 +501,13 @@ def plot_asp_ocp_chart(average_speed, occupancy, output_name, output_dir):
     plt.savefig(chart_file)
 
     # Hiển thị biểu đồ
-    plt.show()
+    # plt.show()
 
 # Save to CSV
-def save_to_csv(average_speed, occupancy, congestion_rate, output_file):
+def save_to_csv(average_speed, occupancy, congestion_rate, vehicle_count, output_file):
 
     # Kiểm tra độ dài của mảng
-    if not (len(average_speed) == len(occupancy) == len(congestion_rate)):
+    if not (len(average_speed) == len(occupancy) == len(congestion_rate) == len(vehicle_count)):
         raise ValueError("Các mảng phải có cùng độ dài")
     
     # Tạo mảng timestamp với bước nhảy 1/3 giây
@@ -479,11 +518,20 @@ def save_to_csv(average_speed, occupancy, congestion_rate, output_file):
         'Timestamp':timestamps,
         'Average Speed (km/h)': [round(speed, 2) for speed in average_speed],
         'Occupancy (%)': [round(occur, 2) for occur in occupancy],
-        'Congestion Rate (%)': [round(rate, 2) for rate in congestion_rate]
+        'Congestion Rate (%)': [round(rate, 2) for rate in congestion_rate],
+        'Vehicle count': vehicle_count
     })
     
     # Ghi dataframe vào file CSV
     df.to_csv(output_file, index=False)
+
+# Convert to MP4
+def convert_to_mp4(input_file, output_file):
+    # Load video file bằng MoviePy
+    clip = VideoFileClip(input_file)
+    
+    # Lưu file với codec 'libx264' để chuyển sang MP4
+    clip.write_videofile(output_file, codec="libx264")
 
 # Save output
 def save_video(frames, input_video_path, output_video_path):
@@ -491,17 +539,23 @@ def save_video(frames, input_video_path, output_video_path):
     base_filename = os.path.basename(input_video_path).split('.')[0]
     timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")
     output_name = f"{base_filename}_{timestamp}"
-    output_file = os.path.join(f"{output_video_path}", f"{output_name}.avi")
-
+    output_file_xvid = os.path.join(output_video_path,  f"{output_name}.avi")
+    output_file_mp4 = os.path.join(output_video_path, f"{output_name}.mp4")
+    
     fourcc = cv2.VideoWriter_fourcc(*"XVID")
     w, h = 1280, 720
 
-    out = cv2.VideoWriter(output_file, fourcc, 30, (w, h))
+    out = cv2.VideoWriter(output_file_xvid, fourcc, 30, (w, h))
     for frame in frames:
         out.write(frame)
     out.release()
 
-    return output_name
+    convert_to_mp4(output_file_xvid, output_file_mp4)
+
+    if os.path.exists(output_file_xvid):
+        os.remove(output_file_xvid)
+
+    return output_file_mp4
 
 # Main execution
 if __name__ == "__main__":
@@ -509,7 +563,7 @@ if __name__ == "__main__":
     # Initialize
     model = YOLO("models/yolov8x/yolov8x.pt")
     # model = YOLO("models/yolov8x/best.pt")
-    input_video_path = "input_videos/demo7.mp4"
+    input_video_path = "input_videos/demo6.mp4"
     output_video_path = "output_videos"
     output_chart_path = "charts"
     output_csv_path = "csv"
@@ -530,5 +584,5 @@ if __name__ == "__main__":
     plot_asp_ocp_chart(average_speed, occupancy, saved_video, output_chart_path)
     
     # Save data to CSV
-    save_to_csv(average_speed, occupancy, congestion_rate, os.path.join(output_csv_path, f"{saved_video}_data.csv"))
+    save_to_csv(average_speed, occupancy, congestion_rate, vehicle_count,os.path.join(output_csv_path, f"{saved_video}_data.csv"))
 

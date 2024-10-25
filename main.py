@@ -40,6 +40,7 @@ def processVideo(video_path, model, class_names):
         "truck": 0,
         "bus": 0
     }
+    update_vehicle_count = [0]
 
     # Initialize for tracking speed and occupancy
     frame_counter = 0
@@ -208,7 +209,7 @@ def processVideo(video_path, model, class_names):
     cap.release()
     cv2.destroyAllWindows()
 
-    return frames, vehicle_count, congestion_rate, update_total_avg_speed, update_total_occupancy_density
+    return frames, update_vehicle_count, congestion_rate, update_total_avg_speed, update_total_occupancy_density
 
 # Calculate speed based on bounding box centers
 def calculate_speed(prev_center, curr_center, time_interval):
@@ -218,10 +219,12 @@ def calculate_speed(prev_center, curr_center, time_interval):
 
     dx = curr_center[0] - prev_center[0]
     dy = curr_center[1] - prev_center[1]
-    distance_km = math.sqrt(math.pow(dx, 2) + math.pow(dy, 2)) * scale_factor
-    speed_km = (distance_km / time_interval) * 3600
+    distance = math.sqrt(math.pow(dx, 2) + math.pow(dy, 2))
+    distance_km = distance * scale_factor  
+    speed_km = distance_km / time_interval
+    speed_kmh = speed_km * 3600
 
-    return speed_km
+    return speed_kmh
 
 # Calculate congestion
 def calculate_congestion(avg_speed, occupancy):
