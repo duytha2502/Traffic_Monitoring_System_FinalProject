@@ -5,3 +5,5 @@ charts/
 static/tracked_videos/
 uploads/
 runs/
+.streamlit/
+captured_objects/
