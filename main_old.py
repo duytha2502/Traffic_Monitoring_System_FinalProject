@@ -20,12 +20,6 @@ import math
 import cvzone
 import gridfs
 
-heatmap = solutions.Heatmap(
-    show=False,
-    model='models/yolov8x/yolov8x.pt',
-    colormap=cv2.COLORMAP_JET,
-)
-
 def insert_heatmap_into_frame(frame, heatmap):
     # Resize heatmap nếu cần để phù hợp với kích thước của frame
     heatmap_resized = cv2.resize(heatmap, (frame.shape[1] // 4 + 80, frame.shape[0] // 4 + 40))
@@ -46,6 +40,12 @@ def load_class_names(class_file):
 
 def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_speed, scale, conges_spd, conges_ocp):
 
+    heatmap = solutions.Heatmap(
+    show=False,
+    model='models/yolov8x/yolov8x.pt',
+    colormap=cv2.COLORMAP_JET,
+    )
+
     # Initialize for speed calculation
     prev_centers = {} 
     time_interval = 1 / 30
@@ -60,9 +60,9 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
         "motorcycle": 0
     }
     update_vehicle_count = [0]
+    total_tracks_inside_area = [0]
 
     # Initialize for tracking speed and occupancy
-
     frame_counter = 0
     frames_to_wait = 30 
     update_interval = 10
@@ -76,6 +76,8 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
     congestion_rate = [0]
 
     captured_tracks = set()
+
+    temp_storage = []  # Danh sách tạm lưu hình ảnh
 
     # Initialize frame
     frames = [] 
@@ -113,7 +115,11 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
             for data in result.boxes.data.tolist():
 
                 x1, y1, x2, y2 = int(data[0]), int(data[1]), int(data[2]), int(data[3])
+                conf = data[4]
+                if conf < 0.3:
+                    continue
                 id = int(data[5])
+
                 center = calculate_center(x1, y1, x2, y2)
 
                 if is_inside_area((center[0],center[1]), pts):
@@ -126,13 +132,13 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
         total_frame_area = frame_resized.shape[0] * frame_resized.shape[1]
 
         # Initialize for calculating each frame
-
         total_occupancy_density = 0
 
         speeds = {}
         total_speed = 0
         vehicle_with_speed_count = 0
         total_avg_speed = 0
+        tracks_inside_area = 0
 
         for track in tracks:
             if not track.is_confirmed():
@@ -152,7 +158,9 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
             cy1 = int(y1 - (h/2))
 
             if is_inside_area((x1, y1), pts):
-                
+
+                tracks_inside_area += 1
+
                 # Calculate % of each bounding box for the total frame size 
                 occupancy_density = round((bbox_area/ area) * 100, 2)
                 total_occupancy_density += occupancy_density
@@ -169,8 +177,13 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
                     
                     # Every 5 frame update speed values
                     if frame_counter % update_interval == 0:
-                        if speed > max_speed:  # Nếu tốc độ vượt 80 km/h
-                            capture_speeding_object(frame_resized, captured_tracks, track_id, speed, cx1, cy1, cx2, cy2, "captured_objects")  # Chụp hình lại object
+                        if speed > max_speed:
+                            if track_id not in captured_tracks:
+                                vehicles_os = save_temp_images(temp_storage ,frame_resized, captured_tracks, track_id, speed, cx1, cy1, cx2, cy2)
+                                captured_tracks.add(track_id)
+                            else:
+                                pass
+                        
                         speeds[track_id] = speed
                         all_speeds.update(speeds)
                     
@@ -206,6 +219,11 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
                     elif class_names[class_id] == "motorbike":
                         vehicle_count["motorbike"] += 1
             else: 
+                if track_id in counter_cache:
+                    tracks_inside_area -= 1
+                    counter_cache.remove(track_id)  # Xoá khỏi cache để không trừ nhiều lần
+
+                # Tiếp tục xử lý nếu cần thiết
                 tracks.remove(track)
                 continue
 
@@ -220,6 +238,8 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
             congestion_rate.append(congestion_rate_result)
 
             update_vehicle_count.append(sum(vehicle_count.values()))
+
+            total_tracks_inside_area.append(tracks_inside_area)
         else:
             pass
         
@@ -246,7 +266,7 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
     cap.release()
     cv2.destroyAllWindows()
 
-    return frames, heatmap_frames, vehicle_count, update_vehicle_count, congestion_rate, update_total_avg_speed, update_total_occupancy_density
+    return frames, vehicles_os, vehicle_count, update_vehicle_count, total_tracks_inside_area, congestion_rate, update_total_avg_speed, update_total_occupancy_density
 
 # Calculate speed based on bounding box centers
 def calculate_speed(prev_center, curr_center, time_interval, scale):
@@ -261,22 +281,38 @@ def calculate_speed(prev_center, curr_center, time_interval, scale):
 
     return speed_kmh
 
-def capture_speeding_object(frame, captured_tracks, track_id, speed, cx1, cy1, cx2, cy2, output_dir):
+def save_temp_images(temp_storage, frame, captured_tracks, track_id, speed, cx1, cy1, cx2, cy2):
 
-    if track_id not in captured_tracks:
-        # Cắt hình ảnh vùng bounding box
-        object_img = frame[cy1:cy2, cx1:cx2]
+    object_img = frame[cy1:cy2, cx1:cx2]
 
-        # Tạo đường dẫn lưu file
-        output_file = os.path.join(output_dir, f"vehicle_{track_id}_{speed:.2f}.png")
+    # Mã hóa ảnh thành byte dữ liệu
+    _, buffer = cv2.imencode('.png', object_img)
+    img_bytes = buffer.tobytes()
+    
+    temp_storage.append({
+        "track_id": track_id,
+        "speed": speed,
+        "image": img_bytes  # Bạn có thể chuyển đổi hình ảnh sang định dạng mong muốn
+    })
 
-        # Lưu hình ảnh object
-        cv2.imwrite(output_file, object_img)
+    return temp_storage
 
-        captured_tracks.add(track_id)
-    else: 
-        pass
+def capture_speeding_object(video_name, temp_storage, fs):
 
+    for record in temp_storage:
+
+        # Tạo tên file và metadata để lưu vào MongoDB
+        filename = f"vehicle_{record["track_id"]}_{record["speed"]:.2f}.png"
+        metadata = {
+            "video_name": video_name,
+            "vehicle id": f"{record["speed"]:.2f}",
+            "speed": record["speed"]
+        }
+
+        # Lưu hình ảnh vào GridFS
+        file_id = fs.put(record["image"], filename=filename, metadata=metadata)
+
+    
 # Calculate congestion
 def calculate_congestion(avg_speed, occupancy, conges_spd, conges_ocp):
 
@@ -363,22 +399,22 @@ def draw_metric(image):
     return image
 
 # Send SMS notification
-def send_sms_alert(congestion_rate):
+# def send_sms_alert(congestion_rate):
 
-    twilio_number = '+18039982438'
-    recipient_number = '+84788024737'
+#     twilio_number = '+18039982438'
+#     recipient_number = '+84788024737'
 
-    # Create Twilio client
-    client = Client(account_sid, auth_token)
+#     # Create Twilio client
+#     client = Client(account_sid, auth_token)
 
-    # Send SMS
-    # in body part you have to write your message
-    message = client.messages.create(
-        body= f"The congestion rate has reached {congestion_rate:.2f} %. Immediate action required.",
-        from_=twilio_number,
-        to=recipient_number
-    )
-    print("SMS sent successfully.")
+#     # Send SMS
+#     # in body part you have to write your message
+#     message = client.messages.create(
+#         body= f"The congestion rate has reached {congestion_rate:.2f} %. Immediate action required.",
+#         from_=twilio_number,
+#         to=recipient_number
+#     )
+#     print("SMS sent successfully.")
 
 # Send email alert
 def send_email_alert(congestion_rate):
@@ -423,14 +459,14 @@ def check_congestion_and_notify(congestion_rate, frame_counter, frames_to_wait):
 
 # Draw chart and save
 # Pie chart
-def plot_vehicle_pie_chart(vehicle_count, output_name, output_dir):
+def plot_vehicle_pie_chart(vehicle_count_each):
     # Dữ liệu cho biểu đồ
-    labels = list(vehicle_count.keys())  # Các loại phương tiện
-    sizes = list(vehicle_count.values())  # Số lượng phương tiện
+    labels = list(vehicle_count_each.keys())  # Các loại phương tiện
+    sizes = list(vehicle_count_each.values())  # Số lượng phương tiện
     colors = ['red', 'yellow', 'green', 'blue']
-    explode = (0.1, 0, 0, 0)
+    explode = (0.15, 0, 0, 0)  # Đẩy phần của loại đầu tiên ra khỏi tâm
 
-    # Lọc ra các giá trị và labels không bằng 0
+    # Lọc các giá trị và labels không bằng 0
     filtered_labels = [label for label, size in zip(labels, sizes) if size > 0]
     filtered_sizes = [size for size in sizes if size > 0]
     filtered_colors = [colors[i] for i, size in enumerate(sizes) if size > 0]
@@ -438,94 +474,88 @@ def plot_vehicle_pie_chart(vehicle_count, output_name, output_dir):
 
     # Vẽ biểu đồ tròn
     plt.figure(figsize=(7, 7))
-    plt.pie(filtered_sizes, labels=filtered_labels, colors=filtered_colors, autopct='%1.1f%%', startangle=90, explode=filtered_explode, shadow = True, textprops={'fontsize': 12})
-    plt.legend(title = "Vehicles:")
+    plt.pie(
+        filtered_sizes, 
+        labels=filtered_labels, 
+        colors=filtered_colors, 
+        autopct='%1.1f%%', 
+        startangle=90, 
+        explode=filtered_explode, 
+        shadow=True, 
+        textprops={'fontsize': 12}
+    )
+    plt.legend(title="Vehicles:")
     plt.axis('equal')  # Đảm bảo biểu đồ tròn
-
-    # Tiêu đề cho biểu đồ
-    plt.title("Vehicle radio Pie Chart", y=1.05)
-
-    chart_path = os.path.join(f"{output_dir}", f"{output_name}")
-
-    # Tạo thư mục nếu chưa tồn tại
-    if not os.path.exists(chart_path):
-        os.makedirs(chart_path)
-
-    # Lưu biểu đồ vào thư mục với tên file phù hợp
-    chart_file = os.path.join(f"{chart_path}", f"{output_name}_pie.png")
-    plt.savefig(chart_file)
-
-    # Hiển thị biểu đồ
-    # plt.show()
-    return chart_file
-
-# Line chart
-def plot_congestion_line_chart(congestion_rate, output_name, output_dir):
     
-    timestamps = np.arange(len(congestion_rate)) * 0.333
+    return plt
 
-    # Vẽ biểu đồ Line cho congestion rate
-    plt.figure(figsize=(10, 6))
-    plt.plot(timestamps, congestion_rate, color='red', label='Congestion Rate (%)')
-    plt.title('Congestion Rate over Time')
-    plt.xlabel('Time (seconds)')
-    plt.ylabel('Congestion Rate (%)')
-    plt.legend()
-    plt.grid(True)
-
-    # Tiêu đề cho biểu đồ
-    plt.title("Congestion rate Line Chart")
-
-    chart_path = os.path.join(f"{output_dir}", f"{output_name}")
-
-    # Tạo thư mục nếu chưa tồn tại
-    if not os.path.exists(chart_path):
-        os.makedirs(chart_path)
-
-    # Lưu biểu đồ vào thư mục với tên file phù hợp
-    chart_file = os.path.join(f"{chart_path}", f"{output_name}_line.png")
-    plt.savefig(chart_file)
-
-    # Hiển thị biểu đồ
-    # plt.show()
-    return chart_file
-
-# Average speed and occupancy chart
-def plot_asp_ocp_chart(average_speed, occupancy, output_name, output_dir):
+# # Line chart
+# def plot_congestion_line_chart(congestion_rate, output_name, output_dir):
     
-    timestamps = np.arange(len(average_speed)) * 0.333
+#     timestamps = np.arange(len(congestion_rate)) * 0.333
 
-    fig, ax1 = plt.subplots(figsize=(10, 6))
+#     # Vẽ biểu đồ Line cho congestion rate
+#     plt.figure(figsize=(10, 6))
+#     plt.plot(timestamps, congestion_rate, color='red', label='Congestion Rate (%)')
+#     plt.title('Congestion Rate over Time')
+#     plt.xlabel('Time (seconds)')
+#     plt.ylabel('Congestion Rate (%)')
+#     plt.legend()
+#     plt.grid(True)
 
-    # Biểu đồ Line cho tốc độ trung bình
-    ax1.plot(timestamps, average_speed, color='b', label='Average Speed (km/h)', linewidth=2)
-    ax1.set_xlabel('Time (seconds)')
-    ax1.set_ylabel('Average Speed (km/h)', color='b')
-    ax1.tick_params(axis='y', labelcolor='b')
+#     # Tiêu đề cho biểu đồ
+#     plt.title("Congestion rate Line Chart")
 
-    # Biểu đồ Bar cho occupancy
-    ax2 = ax1.twinx()  # Tạo trục Y kép
-    ax2.plot(timestamps, occupancy, color='r', label='Occupancy (%)', linewidth=2)
-    ax2.set_ylabel('Occupancy (%)', color='r')
-    ax2.tick_params(axis='y', labelcolor='r')
+#     chart_path = os.path.join(f"{output_dir}", f"{output_name}")
 
-    # Tiêu đề và hiển thị biểu đồ
-    plt.title('Average Speed and Occupancy over Time')
-    fig.tight_layout()
+#     # Tạo thư mục nếu chưa tồn tại
+#     if not os.path.exists(chart_path):
+#         os.makedirs(chart_path)
 
-    chart_path = os.path.join(f"{output_dir}", f"{output_name}")
+#     # Lưu biểu đồ vào thư mục với tên file phù hợp
+#     chart_file = os.path.join(f"{chart_path}", f"{output_name}_line.png")
+#     plt.savefig(chart_file)
 
-    # Tạo thư mục nếu chưa tồn tại
-    if not os.path.exists(chart_path):
-        os.makedirs(chart_path)
+#     # Hiển thị biểu đồ
+#     # plt.show()
+#     return chart_file
 
-    # Lưu biểu đồ vào thư mục với tên file phù hợp
-    chart_file = os.path.join(f"{chart_path}", f"{output_name}_hybrid.png")
-    plt.savefig(chart_file)
+# # Average speed and occupancy chart
+# def plot_asp_ocp_chart(average_speed, occupancy, output_name, output_dir):
+    
+#     timestamps = np.arange(len(average_speed)) * 0.333
 
-    # Hiển thị biểu đồ
-    # plt.show()
-    return chart_file
+#     fig, ax1 = plt.subplots(figsize=(10, 6))
+
+#     # Biểu đồ Line cho tốc độ trung bình
+#     ax1.plot(timestamps, average_speed, color='b', label='Average Speed (km/h)', linewidth=2)
+#     ax1.set_xlabel('Time (seconds)')
+#     ax1.set_ylabel('Average Speed (km/h)', color='b')
+#     ax1.tick_params(axis='y', labelcolor='b')
+
+#     # Biểu đồ Bar cho occupancy
+#     ax2 = ax1.twinx()  # Tạo trục Y kép
+#     ax2.plot(timestamps, occupancy, color='r', label='Occupancy (%)', linewidth=2)
+#     ax2.set_ylabel('Occupancy (%)', color='r')
+#     ax2.tick_params(axis='y', labelcolor='r')
+
+#     # Tiêu đề và hiển thị biểu đồ
+#     plt.title('Average Speed and Occupancy over Time')
+#     fig.tight_layout()
+
+#     chart_path = os.path.join(f"{output_dir}", f"{output_name}")
+
+#     # Tạo thư mục nếu chưa tồn tại
+#     if not os.path.exists(chart_path):
+#         os.makedirs(chart_path)
+
+#     # Lưu biểu đồ vào thư mục với tên file phù hợp
+#     chart_file = os.path.join(f"{chart_path}", f"{output_name}_hybrid.png")
+#     plt.savefig(chart_file)
+
+#     # Hiển thị biểu đồ
+#     # plt.show()
+#     return chart_file
 
 # Save to CSV
 def save_to_csv(average_speed, occupancy, congestion_rate, file_name, output_dir):
@@ -545,12 +575,12 @@ def save_to_csv(average_speed, occupancy, congestion_rate, file_name, output_dir
         'Congestion Rate (%)': [round(rate, 2) for rate in congestion_rate],
     })
     
-    csv_file = os.path.join(output_dir, f"{file_name}_data.csv")
+    csv_file_name = os.path.join(output_dir, f"{file_name}_data.csv")
     
     # Ghi dataframe vào file CSV
-    df.to_csv(csv_file, index=False)
+    df.to_csv(csv_file_name, index=False)
 
-    return csv_file
+    return csv_file_name, df
 
 # Convert to MP4
 def convert_to_mp4(input_file, output_file):
@@ -609,25 +639,25 @@ def save_video_heatmap(frames, input_video_path, output_video_path):
     return output_heatmap_mp4, output_heatmap_name
 
 # Main execution
-if __name__ == "__main__":
+# if __name__ == "__main__":
 
-    # Initialize
-    model = YOLO("models/yolov8x/yolov8x.pt")
-    # model = YOLO("models/yolov8x/best.pt")
-    input_video_path = "input_videos/demo6.mp4"
-    output_video_path = "output_videos"
-    output_chart_path = "charts"
-    output_csv_path = "csv"
-    class_file = 'classes_name.txt'
+#     # Initialize
+#     model = YOLO("models/yolov8x/yolov8x.pt")
+#     # model = YOLO("models/yolov8x/best.pt")
+#     input_video_path = "input_videos/demo6.mp4"
+#     output_video_path = "output_videos"
+#     output_chart_path = "charts"
+#     output_csv_path = "csv"
+#     class_file = 'classes_name.txt'
 
-    # Load class names
-    class_names = load_class_names(class_file)
+#     # Load class names
+#     class_names = load_class_names(class_file)
 
-    # Process the video
-    processed_frames, vehicle_count, congestion_rate, average_speed, occupancy = processVideo(input_video_path, model, class_names)
+#     # Process the video
+#     processed_frames, vehicle_count, congestion_rate, average_speed, occupancy = processVideo(input_video_path, model, class_names)
 
-    # Save the processed video
-    saved_video = save_video(processed_frames, input_video_path, output_video_path)
+#     # Save the processed video
+#     saved_video = save_video(processed_frames, input_video_path, output_video_path)
     
     # # Save charts
     # plot_vehicle_pie_chart(vehicle_count, saved_video, output_chart_path)
