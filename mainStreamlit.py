@@ -51,8 +51,8 @@ def login():
         if st.button("Log in", use_container_width=True):
             if authenticate_user(email, password):
                 st.session_state.logged_in = True
+                st.session_state["show_success_message"] = True
                 st.session_state["email"] = email
-                st.success("Logged in successfully.")
                 st.rerun()
             else:
                 st.error("Invalid email or password")
@@ -72,6 +72,10 @@ def logout():
 # Kiểm tra trạng thái và hiển thị giao diện phù hợp
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
+
+if "show_success_message" in st.session_state:
+    st.toast(f"Welcome {st.session_state['email']} !")
+    del st.session_state["show_success_message"]
 
 if "is_register" not in st.session_state:
     st.session_state["is_register"] = False
