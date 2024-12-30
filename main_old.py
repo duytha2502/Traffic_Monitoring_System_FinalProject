@@ -2,8 +2,7 @@ from ultralytics import YOLO, solutions
 from deep_sort_realtime.deepsort_tracker import DeepSort
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from twilio.rest import Client
-from datetime import datetime,  timedelta
+from datetime import datetime, timedelta
 from moviepy.editor import VideoFileClip
 import time
 import http.client
@@ -57,14 +56,14 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
         "car": 0,
         "truck": 0,
         "bus": 0,
-        "motorcycle": 0
+        "motorbike": 0
     }
     update_vehicle_count = [0]
     total_tracks_inside_area = [0]
 
     # Initialize for tracking speed and occupancy
     frame_counter = 0
-    frames_to_wait = 30 
+    frames_to_wait = 60 
     update_interval = 10
 
     occupancy_density = 0
@@ -74,10 +73,12 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
     update_total_avg_speed = [0]
 
     congestion_rate = [0]
+    congestion_log = []
 
     captured_tracks = set()
 
     temp_storage = []  # Danh sách tạm lưu hình ảnh
+    vehicles_os = {}
 
     # Initialize frame
     frames = [] 
@@ -87,7 +88,7 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
     cap = cv2.VideoCapture(video_path)
 
     # Initialize Deepsort 
-    object_tracker = DeepSort(max_age= 3, n_init= 3)
+    object_tracker = DeepSort()
 
     while cap.isOpened():
         ret, frame = cap.read()
@@ -102,7 +103,7 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
         results = model.predict(frame_resized, stream=True, device='cuda')
 
         # Draw on frame
-        frame_resized, pts = draw_area(frame_resized, cora, corb, corc, cord)
+        frame_resized, pts, y_center = draw_area(frame_resized, cora, corb, corc, cord)
 
         # Heatmap
         heatmap_frame = heatmap.generate_heatmap(frame_resized)
@@ -114,18 +115,18 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
         for result in results:
             for data in result.boxes.data.tolist():
 
-                x1, y1, x2, y2 = int(data[0]), int(data[1]), int(data[2]), int(data[3])
-                conf = data[4]
-                if conf < 0.3:
+                x1, y1, x2, y2, conf, id = int(data[0]), int(data[1]), int(data[2]), int(data[3]), data[4], int(data[5])
+
+                if conf < 0.3 or class_names[id] == "person":
                     continue
-                id = int(data[5])
 
                 center = calculate_center(x1, y1, x2, y2)
 
                 if is_inside_area((center[0],center[1]), pts):
+
                     drawBox(data, frame_resized, class_names[id])
                 
-            details = get_details(result, frame_resized)
+            details = get_details(result, frame_resized, class_names)
 
         tracks = object_tracker.update_tracks(details, frame=frame_resized)
 
@@ -175,11 +176,12 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
                     else:
                         speed = 0
                     
-                    # Every 5 frame update speed values
+                    # Every frame update speed values
                     if frame_counter % update_interval == 0:
                         if speed > max_speed:
                             if track_id not in captured_tracks:
-                                vehicles_os = save_temp_images(temp_storage ,frame_resized, captured_tracks, track_id, speed, cx1, cy1, cx2, cy2)
+                                vehicles = save_temp_images(temp_storage ,frame_resized, captured_tracks, track_id, speed, cx1, cy1, cx2, cy2)
+                                vehicles_os = vehicles
                                 captured_tracks.add(track_id)
                             else:
                                 pass
@@ -208,16 +210,10 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
                     total_avg_speed = 0
 
                 # Count each kind of vehicles
-                if y1 > int(pts[-1][0][1] - 10) and track_id not in counter_cache: 
+                if y1 < y_center and track_id not in counter_cache: 
                     counter_cache.append(track_id)          
-                    if class_names[class_id] == "car":
-                        vehicle_count["car"] += 1
-                    elif class_names[class_id] == "truck":
-                        vehicle_count["truck"] += 1
-                    elif class_names[class_id] == "bus":
-                        vehicle_count["bus"] += 1
-                    elif class_names[class_id] == "motorbike":
-                        vehicle_count["motorbike"] += 1
+                    if class_names[class_id] in ["car", "truck", "bus", "motorbike"]:
+                        vehicle_count[class_names[class_id]] += 1
             else: 
                 if track_id in counter_cache:
                     tracks_inside_area -= 1
@@ -226,7 +222,7 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
                 # Tiếp tục xử lý nếu cần thiết
                 tracks.remove(track)
                 continue
-
+        
         # Every 10 frame update the values
         if frame_counter % update_interval == 0:
             
@@ -244,11 +240,11 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
             pass
         
         # Check and sending notification
-        # check_congestion_and_notify(congestion_rate, frame_counter, frames_to_wait)
+        congestion_log_total = check_congestion_and_notify(congestion_rate, frame_counter, frames_to_wait, congestion_log)
 
         cv2.putText(frame_resized, f'Total Vehicles: {sum(vehicle_count.values())}', (930, 60), cv2.FONT_HERSHEY_DUPLEX, 1, (255, 255, 255), 2)
         cv2.putText(frame_resized, f'Car: {vehicle_count["car"]}', (930, 100), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
-        cv2.putText(frame_resized, f'Motorcycle: {vehicle_count["motorcycle"]}', (930, 130), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
+        cv2.putText(frame_resized, f'Motorbike: {vehicle_count["motorbike"]}', (930, 130), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
         cv2.putText(frame_resized, f'Truck: {vehicle_count["truck"]}', (1140, 100), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
         cv2.putText(frame_resized, f'Bus: {vehicle_count["bus"]}', (1140, 130), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2) 
         cv2.putText(frame_resized, f'Average Speed: {update_total_avg_speed[-1]:.0f} km/h', (930, 190), cv2.FONT_HERSHEY_DUPLEX, 0.8, (255, 255, 255), 2)
@@ -266,7 +262,7 @@ def processVideo(video_path, model, class_names, cora, corb, corc, cord, max_spe
     cap.release()
     cv2.destroyAllWindows()
 
-    return frames, vehicles_os, vehicle_count, update_vehicle_count, total_tracks_inside_area, congestion_rate, update_total_avg_speed, update_total_occupancy_density
+    return frames, vehicles_os, vehicle_count, update_vehicle_count, total_tracks_inside_area, congestion_rate, update_total_avg_speed, update_total_occupancy_density, congestion_log_total
 
 # Calculate speed based on bounding box centers
 def calculate_speed(prev_center, curr_center, time_interval, scale):
@@ -305,21 +301,22 @@ def capture_speeding_object(video_name, temp_storage, fs):
         filename = f"vehicle_{record["track_id"]}_{record["speed"]:.2f}.png"
         metadata = {
             "video_name": video_name,
-            "vehicle id": f"{record["speed"]:.2f}",
-            "speed": record["speed"]
+            "vehicle_id": record["track_id"],
+            "speed": f"{record["speed"]:.2f}"
         }
 
         # Lưu hình ảnh vào GridFS
         file_id = fs.put(record["image"], filename=filename, metadata=metadata)
 
-    
+    temp_storage.clear() 
+
 # Calculate congestion
 def calculate_congestion(avg_speed, occupancy, conges_spd, conges_ocp):
 
-    # Tính So (Giả sử tốc độ trung bình cao nhất để So bằng 0 là 60km/h)
+    # Tính So (Giả sử tốc độ trung bình cao nhất để So bằng 0 là  = conges_spd)
     So = max(10 * (1 - avg_speed / conges_spd), 0)
     
-    # Tính Oc (Giả sử Oc lớn nhất khi độ occupancy bằng 90% )
+    # Tính Oc (Giả sử Oc lớn nhất khi độ occupancy = conges_ocp )
     Oc = min(10 * occupancy / conges_ocp, 10)
     
     # Tính congestion rate
@@ -337,14 +334,22 @@ def drawBox(data, frame, name):
     return frame
 
 # Details
-def get_details(result, frame):
+def get_details(result, frame, class_names):
 
     classes = result.boxes.cls.cpu().numpy()
     conf = result.boxes.conf.cpu().numpy()   
     xywh = result.boxes.xywh.cpu().numpy()
     detections = []
     for i,item in enumerate(xywh):
-        sample = (item,conf[i] ,classes[i])
+        # Lấy tên lớp dựa trên chỉ số của lớp
+        class_name = class_names[int(classes[i])]
+
+        # Bỏ qua các đối tượng thuộc lớp "person"
+        if class_name == "person":
+            continue
+
+        # Thêm các đối tượng không phải "person" vào danh sách
+        sample = (item, conf[i], classes[i])
         detections.append(sample)
 
     return detections
@@ -354,21 +359,25 @@ def draw_area(image, cora, corb, corc, cord):
     pts = np.array([[cora], [corb], 
                     [corc], [cord]],
                     np.int32)
-    # Define a polygon area of demo6.mp4
-    # pts = np.array([[590, 350], [810, 350], 
-    #                 [910, 650], [210, 650]],
+
+    # Define a polygon area of demo2.mp4
+    # pts = np.array([[650, 300], [950, 300], 
+    #                 [850, 450], [10, 450]],
     #                 np.int32)
 
-    # Define a polygon area of demo4_greenlight.mp4
-    # pts = np.array([[190, 300], [650, 300], 
-    #                 [1200, 650], [190, 650]],
+    # Define a polygon area of demo.mp4
+    # pts = np.array([[600, 200], [850, 200], 
+    #                 [700, 450], [10, 450]],
     #                 np.int32)
-    
+  
     pts = pts.reshape((-1, 1, 2))
 
     image = cv2.polylines(image, [pts], isClosed=True, color=(0, 0, 255), thickness=2)
 
-    return image, pts
+    y_values = pts[:, 0, 1]
+    y_center = int(np.mean(y_values))
+
+    return image, pts, y_center
 
 def polygon_area(pts):
 
@@ -398,24 +407,6 @@ def draw_metric(image):
 
     return image
 
-# Send SMS notification
-# def send_sms_alert(congestion_rate):
-
-#     twilio_number = '+18039982438'
-#     recipient_number = '+84788024737'
-
-#     # Create Twilio client
-#     client = Client(account_sid, auth_token)
-
-#     # Send SMS
-#     # in body part you have to write your message
-#     message = client.messages.create(
-#         body= f"The congestion rate has reached {congestion_rate:.2f} %. Immediate action required.",
-#         from_=twilio_number,
-#         to=recipient_number
-#     )
-#     print("SMS sent successfully.")
-
 # Send email alert
 def send_email_alert(congestion_rate):
     smtp_server = "smtp.gmail.com"
@@ -425,7 +416,7 @@ def send_email_alert(congestion_rate):
     password = "wtjv ityr qyjc vbob"
 
     subject = "Congestion Alert!"
-    body = f"The congestion rate has reached {congestion_rate:.2f} %. Immediate action required."
+    body = f"The congestion rate has reached {congestion_rate[-1]:.2f} %. Immediate action required."
 
     # Set up the email message
     msg = MIMEMultipart()
@@ -445,49 +436,23 @@ def send_email_alert(congestion_rate):
 
 
 # Check congestion rate
-def check_congestion_and_notify(congestion_rate, frame_counter, frames_to_wait):
+def check_congestion_and_notify(congestion_rate, frame_counter, frames_to_wait, congestion_log):
 
     if frame_counter % frames_to_wait == 0:
-        if congestion_rate >= 90:
-            print("Congestion rate has reached 90%! Sending alert...")
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if congestion_rate[-1] >= 90:
+            status = "Alert Sent"
             send_email_alert(congestion_rate)
-            # send_sms_alert(congestion_rate)
         else:
-            print(f"Congestion rate is {congestion_rate}%. No need to send alert yet.")
-    else:
-        print(f"Congestion rate is {congestion_rate}%, waiting before sending next alert.")
+            status = "No Alert Sent"
+        
+        congestion_log.append({
+            "time": current_time,
+            "congestion_rate": congestion_rate[-1],
+            "status": status
+        })
 
-# Draw chart and save
-# Pie chart
-def plot_vehicle_pie_chart(vehicle_count_each):
-    # Dữ liệu cho biểu đồ
-    labels = list(vehicle_count_each.keys())  # Các loại phương tiện
-    sizes = list(vehicle_count_each.values())  # Số lượng phương tiện
-    colors = ['red', 'yellow', 'green', 'blue']
-    explode = (0.15, 0, 0, 0)  # Đẩy phần của loại đầu tiên ra khỏi tâm
-
-    # Lọc các giá trị và labels không bằng 0
-    filtered_labels = [label for label, size in zip(labels, sizes) if size > 0]
-    filtered_sizes = [size for size in sizes if size > 0]
-    filtered_colors = [colors[i] for i, size in enumerate(sizes) if size > 0]
-    filtered_explode = [explode[i] for i, size in enumerate(sizes) if size > 0]
-
-    # Vẽ biểu đồ tròn
-    plt.figure(figsize=(7, 7))
-    plt.pie(
-        filtered_sizes, 
-        labels=filtered_labels, 
-        colors=filtered_colors, 
-        autopct='%1.1f%%', 
-        startangle=90, 
-        explode=filtered_explode, 
-        shadow=True, 
-        textprops={'fontsize': 12}
-    )
-    plt.legend(title="Vehicles:")
-    plt.axis('equal')  # Đảm bảo biểu đồ tròn
-    
-    return plt
+    return congestion_log
 
 # # Line chart
 # def plot_congestion_line_chart(congestion_rate, output_name, output_dir):

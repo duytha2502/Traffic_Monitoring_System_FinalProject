@@ -1,0 +1,43 @@
+cookie:
+  expiry_days: 30
+  key: duythai2502
+  name: duythai
+credentials:
+  usernames:
+    jsmith:
+      email: duythai2502@gmail.com
+      failed_login_attempts: 5
+      first_name: Duy
+      last_name: Thai
+      logged_in: true
+      password: $2b$12$EtUy9kpZEAoZW1id1FVHO.tTNh0shcRP6M.D8UNXIVmjdjx7xUKae
+      roles:
+      - admin
+      - editor
+      - viewer
+    rbriggs:
+      email: rbriggs@gmail.com
+      failed_login_attempts: 0
+      first_name: Rebecca
+      last_name: Briggs
+      logged_in: false
+      password: $2b$12$i4AthlZNpa.eSvpIGYEJdOjLxPmbYy/SfHOezSB3.YQ4f2Cy0xWMC
+      roles:
+      - viewer
+    zigg01288024737@gmail.com:
+      email: zigg01288024737@gmail.com
+      failed_login_attempts: 0
+      first_name: Duy
+      last_name: Thai
+      logged_in: true
+      password: $2b$12$0GK/JFVZvgXGKMYYU0NA/uwHM5TCzDEVY7AMEzIn4WHdGPUobuxze
+      password_hint: duy
+      roles: null
+oauth2:
+  google:
+    client_id: 105585197137-qi88mqsjb37nq64k4b79tegn0ma6802i.apps.googleusercontent.com
+    client_secret: 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
+    redirect_uri: http://localhost:8501
+pre-authorized:
+  emails:
+  - duythai2502@gmail.com

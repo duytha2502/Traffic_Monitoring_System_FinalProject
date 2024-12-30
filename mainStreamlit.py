@@ -1,5 +1,6 @@
 import streamlit as st
 import pymongo
+from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
 # Kết nối đến MongoDB
@@ -8,15 +9,15 @@ db = client["processed_videos"]
 users_collection = db["users"]
 
 # Hàm tạo tài khoản (lưu mật khẩu đã mã hóa)
-def create_user(email, password):
+def create_user(email, new_username_firstname ,new_username_lastname, password):
     password_hash = generate_password_hash(password)
-    users_collection.insert_one({"email": email, "password": password_hash})
+    users_collection.insert_one({"role": 1, "email": email, "first_name": new_username_firstname, "last_name": new_username_lastname ,"password": password_hash, "created_time": datetime.now(), "updated_time": datetime.now()})
 
 # Hàm xác thực người dùng
 def authenticate_user(email, password):
     user = users_collection.find_one({"email": email})
     if user and check_password_hash(user["password"], password):
-        return True
+        return user
     return False
 
 def register():
@@ -28,17 +29,29 @@ def register():
     confirm_password = st.text_input("Confirm Password", type="password")
     if st.button("Register", use_container_width=True):
         if email and new_password:
-            create_user(email, new_password)
-            st.success("Account created successfully. Please log in.")
-            st.session_state["is_register"] = False  # Quay lại trang đăng nhập sau khi đăng ký
-            st.rerun()
+            if new_password != confirm_password:
+                st.toast("Passwords do not match!", icon="⚠️")
+            else:
+                existing_user = db.users.find_one({"email": email})
+                if existing_user:
+                    st.toast("This email is already registered. Please use a different email !", icon="⚠️")
+                else:
+                    create_user(email, new_username_firstname, new_username_lastname, new_password)
+                    st.session_state["is_register"] = False  
+                    st.session_state["register_message"] = "Registration successful !"
+                    st.rerun()
+
         else:
             st.error("Please enter a username and password")
-    
-      # Nút chuyển sang đăng nhập
+
+    # Nút chuyển sang đăng nhập
     if st.button("Switch to Login", use_container_width=True):
         st.session_state["is_register"] = False
         st.rerun()
+
+if "register_message" in st.session_state:
+    st.toast(st.session_state["register_message"])
+    del st.session_state["register_message"] 
 
 def login():
     col1 , col2 = st.columns(2)
@@ -50,12 +63,13 @@ def login():
         password = st.text_input("Password", type="password")
         if st.button("Log in", use_container_width=True):
             if authenticate_user(email, password):
-                st.session_state.logged_in = True
-                st.session_state["show_success_message"] = True
+                st.session_state["role"] = authenticate_user(email, password).get("role")
                 st.session_state["email"] = email
+                st.session_state["show_success_message"] = True
+                st.session_state.logged_in = True
                 st.rerun()
             else:
-                st.error("Invalid email or password")
+                st.toast("Invalid email or password !")
     
         # Nút chuyển sang đăng ký
         if st.button("Switch to Register", use_container_width=True):
@@ -67,6 +81,7 @@ def logout():
     if st.button("Log out"):
         st.session_state.logged_in = False
         del st.session_state.email
+        del st.session_state.role
         st.rerun()
 
 # Kiểm tra trạng thái và hiển thị giao diện phù hợp
@@ -87,21 +102,38 @@ else:
 
 logout_page = st.Page(logout, title="Log out", icon=":material/logout:")
 
+# Admin
+user = st.Page(
+    "pages/admin/users_manage.py", title="Users", icon=":material/person:", default=True)
+video = st.Page(
+    "pages/admin/videos_manage.py", title="Videos", icon=":material/movie:")
+
+# --- PAGE SETUP ---
+# User
 about = st.Page(
-    "pages/about.py", title="How to use", icon=":material/help:", default=True)
+    page="pages/user/about.py", title="How to use", icon=":material/help:", default=True)
 monitor = st.Page(
-    "pages/monitor.py", title="Monitoring", icon=":material/psychology:")
+    page="pages/user/monitor.py", title="Monitoring", icon=":material/psychology:")
 processed = st.Page(
-    "pages/processed.py", title="Processed Video", icon=":material/database:")
+    page="pages/user/processed.py", title="Processed Video", icon=":material/database:")
 
 if st.session_state.logged_in:
-    pg = st.navigation(
-        {
-            "Account": [logout_page],
-            "Start Tracking": [about, monitor, processed],
-        }
-    )
+    if st.session_state["role"] == 1:
+        pg = st.navigation(
+            {
+                "Account": [logout_page],
+                "Start Tracking": [about, monitor, processed],
+            }
+        )
+    else:
+        pg = st.navigation(
+            {
+                "Account": [logout_page],
+                "Management": [user, video],
+            }
+        )
 else:
+    
     if st.session_state.is_register:
         pg = st.navigation([register_page])
     else:
