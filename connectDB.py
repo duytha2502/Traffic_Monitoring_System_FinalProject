@@ -17,7 +17,7 @@ def connect_to_mongo(db_name):
     mongo_uri = st.secrets["mongo_uri"]
     
     # Kết nối tới MongoDB
-    client = pymongo.MongoClient(mongo_uri)
+    client = pymongo.MongoClient(mongo_uri, tls=True, tlsAllowInvalidCertificates=True)
     
     # Truy cập vào database
     db = client[db_name]
