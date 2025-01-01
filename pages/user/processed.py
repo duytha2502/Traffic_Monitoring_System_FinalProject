@@ -61,6 +61,7 @@ st.markdown(
 
     .ea3mdgi5 {
         width: 1300px;
+        margin-top: -50px
     }
 
     </style>
@@ -286,6 +287,7 @@ date = st.sidebar.date_input(
     max_value= datetime.datetime.now(),
     format="MM/DD/YYYY",
 )
+
 # Query videos for the selected date
 videos_on_date = get_videos_by_date(videos, date)
 
@@ -304,7 +306,7 @@ else:
         selected_video = st.sidebar.selectbox("Select a video", list(video_options.keys()))
 
 st.header(":desktop_computer: Processed Video")
-
+st.markdown("---")
 if selected_video:
 
     # Selected video data
@@ -325,6 +327,7 @@ if selected_video:
         
         # Selected comparison video data
         data_compare_get = get_data(comparison_video)
+        timestamp_compare = data_compare_get.get('timestamp')
         average_speed_compare = data_compare_get.get('average_speed')
         occupancy_compare = data_compare_get.get('occupancy')
         congestion_rate_compare = data_compare_get.get('congestion_rate')
@@ -337,6 +340,7 @@ if selected_video:
             st.write(f"{selected_video}")
             video_id = video_options[selected_video]
             display_video_from_mongodb(video_id)
+
         with col2:
             st.write(f"{comparison_video}")
             video_compare_id = video_options[comparison_video]
@@ -368,7 +372,27 @@ if selected_video:
                 st.metric(label=f"{metric_name}", value=values["selected"])
             with col2:
                 st.metric(label=f"{metric_name}", value=values["comparison"], delta=round(delta, 2))
-        
+       
+        st.subheader("Metric Per time")
+        with st.container():
+            col1cl, col2cl = st.columns(2)
+            with col1cl:
+                chart_metric = pd.DataFrame({
+                    'Timestamp (s)': timestamp,
+                    'Average Speed (km/h)': average_speed,
+                    'Occupancy (%)': occupancy,
+                    'Congestion Rate (%)': congestion_rate,
+                })
+                st.line_chart(chart_metric, x="Timestamp (s)")
+            with col2cl:
+                chart_metric_comparte = pd.DataFrame({
+                    'Timestamp (s)': timestamp_compare,
+                    'Average Speed Compare (km/h)': average_speed_compare,
+                    'Occupancy Compare (%)': occupancy_compare,
+                    'Congestion Rate Compare (%)': congestion_rate_compare,
+                })
+                st.line_chart(chart_metric_comparte, x="Timestamp (s)")
+
         metrics_chart = {
             "Avg speed (km/h)": {
                 "selected": round(sum(average_speed)/len(average_speed), 2),

@@ -2,9 +2,8 @@ models/
 input_videos/
 output_videos/
 charts/
-static/tracked_videos/
 uploads/
 runs/
-img/
-.streamlit/
+csv/
+training/
 captured_objects/

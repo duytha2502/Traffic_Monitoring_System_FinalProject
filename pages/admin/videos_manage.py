@@ -2,7 +2,7 @@ import streamlit as st
 import pymongo
 import pandas as pd
 import gridfs
-from datetime import datetime
+import datetime
 from connectDB import *
 
 # Kết nối đến MongoDB
@@ -44,10 +44,17 @@ st.sidebar.header("Video List")
 videos = get_videos()
 video_options = {filename: _id for _id, filename in videos}
 
-col1, col2 = st.columns([6,1])
+col1, col2, col3 = st.columns([2, 5, 1])
 with col1:
-    selected_video = st.selectbox("Select a video", list(video_options.keys()))
+    st.date_input(
+        "Select your date for fillter",
+        value=None,
+        max_value= datetime.datetime.now(),
+        format="MM/DD/YYYY",
+    )
 with col2:
+    selected_video = st.selectbox("Select a video", list(video_options.keys()))
+with col3:
     with st.popover("Delete"):
         st.write("Are you sure want to delete this video?")
         if st.button("Delete", type="primary", use_container_width=True, icon="⚠️"):

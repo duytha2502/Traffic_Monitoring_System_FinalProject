@@ -1,5 +1,6 @@
 import streamlit as st
 import pymongo
+import time
 import os
 import pandas as pd
 from datetime import datetime
@@ -11,6 +12,20 @@ db, fs = connect_to_mongo("processed_videos")
 data = db["data"]
 user_collection = db["users"]
 log = db["logs"]  
+
+st.markdown(
+    """
+    <style>
+    .e115fcil1 {
+        width: 50%;
+        margin-left: 25%;
+    }
+
+    </style>
+
+    """,
+    unsafe_allow_html=True
+)
 
 def log_action(action, user_email, details=None):
 
@@ -105,7 +120,6 @@ def display_and_edit_users():
             with col1av:
                 avatar = st.image(user_data["avatar"])
                 uploaded_file = st.file_uploader("Choose an image to change avatar", type=["png", "jpg", "jpeg"], label_visibility="collapsed" )
-                   
             with col2av:
                 email = st.text_input("Email", user_data["email"])
                 fn = st.text_input("First Name", user_data["first_name"])
@@ -131,10 +145,13 @@ def display_and_edit_users():
                         "last_name": ln,
                         "updated_time": datetime.now()
                     }
-                    update_avatar(user_data["email"], uploaded_file)
+                    if uploaded_file is not None:
+                        update_avatar(user_data["email"], uploaded_file)
                     user_collection.update_many({"email": email}, {"$set": new_data})
                     st.toast(f"User {email} updated successfully.")
                     log_action("Update", st.session_state["email"], f"Update information for user {email}")
+                    time.sleep(1)
+                    st.rerun()
 
             with col2btn:
                 with st.popover("Delete User", icon="⚠️", use_container_width=True):
@@ -143,6 +160,8 @@ def display_and_edit_users():
                         user_collection.delete_many({"email": email})
                         st.toast(f"User {email} deleted successfully.")
                         log_action("Delete", st.session_state["email"], f"Delete user {email}")
+                        time.sleep(1)
+                        st.rerun()
 
 st.title("This is manage user page")
 display_and_edit_users()

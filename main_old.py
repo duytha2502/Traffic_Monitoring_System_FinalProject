@@ -579,29 +579,6 @@ def save_video(frames, input_video_path, output_video_path):
 
     return output_file_mp4, output_name
 
-# Save output
-def save_video_heatmap(frames, input_video_path, output_video_path):
-
-    base_filename = os.path.basename(input_video_path).split('.')[0]
-    timestamp = datetime.now().strftime("%d%m%Y_%H%M%S")
-    output_heatmap_name = f"{base_filename}_{timestamp}"
-    output_heatmap_xvid = os.path.join(output_video_path,  f"{output_heatmap_name}_heatmap.avi")
-    output_heatmap_mp4 = os.path.join(output_video_path, f"{output_heatmap_name}_heatmap.mp4")
-    
-    fourcc = cv2.VideoWriter_fourcc(*"XVID")
-    w, h = 1280, 720
-
-    out = cv2.VideoWriter(output_heatmap_xvid, fourcc, 30, (w, h))
-    for frame in frames:
-        out.write(frame)
-    out.release()
-
-    convert_to_mp4(output_heatmap_xvid, output_heatmap_mp4)
-
-    if os.path.exists(output_heatmap_xvid):
-        os.remove(output_heatmap_xvid)
-
-    return output_heatmap_mp4, output_heatmap_name
 
 # Main execution
 # if __name__ == "__main__":
