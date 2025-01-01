@@ -1,6 +1,6 @@
 import pymongo
 import gridfs
-import st
+import streamlit as st
 
 def connect_to_mongo(db_name):
     """
