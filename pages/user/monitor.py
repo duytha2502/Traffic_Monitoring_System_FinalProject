@@ -40,6 +40,41 @@ log = db["logs"]
 # Kết nối tới database "vehicles_overspeed"
 vo_db, fsvo = connect_to_mongo("vehicles_overspeed")
 
+st.markdown(
+    """
+    <style>
+    .css-d1b1ld.edgvbvh6 
+    {
+        visibility: hidden;
+    }
+    .css-1v8iw7l.eknhn3m4
+    {
+        visibility: hidden;
+    }
+    .metric_label 
+    {
+        text-align: center;
+    }
+    .metric_number
+    {
+        text-align: center;
+        color: red;
+    }
+
+    .ea3mdgi5 {
+        width: 1500px;
+        margin-top: -50px;
+    }
+
+    .e115fcil1 {
+    margin-left: 15%;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
 # Tạo giao diện bản đồ với Folium
 def create_map(lattitude, longtitude):
     map_center = [lattitude, longtitude]
@@ -275,37 +310,6 @@ def save_data_to_mongodb(vehicle_count_each, vehicle_count, vehicle_inside_area,
 
     data.insert_one(document)
 
-
-st.markdown(
-    """
-    <style>
-    .css-d1b1ld.edgvbvh6 
-    {
-        visibility: hidden;
-    }
-    .css-1v8iw7l.eknhn3m4
-    {
-        visibility: hidden;
-    }
-    .metric_label 
-    {
-        text-align: center;
-    }
-    .metric_number
-    {
-        text-align: center;
-        color: red;
-    }
-
-    .ea3mdgi5 {
-        width: 1500px;
-    }
-
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
 # Main
 st.title('📹 Traffic Monitoring')
 
@@ -408,7 +412,9 @@ if uploaded_video is not None:
 
             # Lưu logs
             log_action("Upload", st.session_state["email"], f"User {st.session_state["email"]} uploaded video {video_id} to start tracking")
-        
+
+            st.toast("Video Processed Successfully!")
+            
         st.subheader("Traffic Overview")
         # Hiển thị video đã xử lý
         with st.container(border=True, key='1'):
@@ -502,60 +508,6 @@ if uploaded_video is not None:
             
             plot_bottom_left(vehicle_inside_area, placeholder)
 
-            # Tạo mảng timestamp với bước nhảy 1/3 giây
-            # timestamps = [round(i * 1/3, 2) for i in range(len(avg_speeds))]
-            # placeholder = st.empty()  
-            # for i in range(1, len(timestamps) + 1):
-            #     # Lấy dữ liệu từ từ
-            #     chart_vehicle_inside_area = pd.DataFrame({
-            #         'Timestamp (s)': timestamps[:i],
-            #         'Vehicles In Area': vehicle_inside_area[:i]
-            #     })
-                
-            #     with placeholder.container():
-            #         st.line_chart(chart_vehicle_inside_area, x="Timestamp (s)", y="Vehicles In Area")
-                
-            #     time.sleep(0.33333)
-            # df = pd.DataFrame({
-            #     'Timestamp': timestamps,
-            #     'Average Speed (km/h)': [round(speed, 2) for speed in avg_speeds],
-            #     'Occupancy (%)': [round(occur, 2) for occur in occupancy_densities],
-            #     'Congestion Rate (%)': [round(rate, 2) for rate in congestion_rates],
-            #     'Vehicle Count': [round(count, 0) for count in vehicle_counts],
-            # })
-
-
-            # st.subheader("Statistic")
-            # st.dataframe(df, hide_index=True, use_container_width=True)
-
-            # Hiển thị biểu đồ
-            # st.subheader("Statistics")
-            # st.image(pie_chart, caption="Vehicle Radio", use_column_width=True)
-            # st.image(hybrid_char, caption="Average Speed and Occupancy over Time", use_column_width=True)
-            # st.image(line_char, caption="Congestion Rate", use_column_width=True)
-
-            # st.subheader("Radio between Average Speed, Occupancy and Congestion Rate")
-            # chart_spd_ocu_cgs = pd.DataFrame({
-            #     'Timestamp (s)': timestamps,
-            #     'Average Speed (km/h)': avg_speeds,
-            #     'Occupancy (%)': occupancy_densities,
-            #     'Congestion Rate (%)': congestion_rates,
-            # })
-            # st.line_chart(chart_spd_ocu_cgs, x="Timestamp (s)", y=["Average Speed (km/h)", "Occupancy (%)", "Congestion Rate (%)"])
-
-            # col1bc, col2bc = st.columns(2)
-            # with col1bc:
-            #     st.subheader("Vehicle Type Quantity")
-            #     chart_vehicle = pd.DataFrame({
-            #         'Vehicle Type': list(vehicle_count_each.keys()),
-            #         'Count': list(vehicle_count_each.values())
-            #     })
-            #     st.bar_chart(chart_vehicle, x='Vehicle Type', y='Count', height=500)
-
-            # with col2bc:
-            #     st.subheader("Vehicle Type Radio")
-            #     pie_chart = plot_vehicle_pie_chart(vehicle_count_each)
-            #     st.pyplot(pie_chart)
     else:
         st.subheader("Traffic Overview")
         with st.container(border=True, key='4'):
@@ -603,7 +555,7 @@ if uploaded_video is not None:
                     demo_bytes = dem_vid.read()
                     st.video(demo_bytes)
                 else:
-                    st.info("No video uploaded yet. Please upload a video to preview it.")
+                    st.info("No video uploaded yet. Upload a video to preview it.")
                 # display_video_from_mongodb(video_id) 
             with col2db2:
                 placeholder = st.empty()
@@ -684,7 +636,7 @@ else:
                 indicator_color="green",
                 indicator_suffix="km/h",
                 indicator_title="Speed",
-                max_bound=100,  
+                max_bound=150,  
             )
         with col4db1:
             plot_gauge(
@@ -698,7 +650,8 @@ else:
         col1db2, col2db2 = st.columns(2, gap='large')
         with col1db2:
             st.subheader("Video")
-            st.info("No video uploaded yet. Please upload a video to preview it.")
+            st.info("No video uploaded yet. Upload a video to preview it.")
+            st.image('img/video_placeholder.png', width=420)
         with col2db2:
             placeholder = st.empty()
         

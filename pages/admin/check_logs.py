@@ -88,13 +88,30 @@ def plot_gauge(
     )
     st.plotly_chart(fig, use_container_width=True)
 
+def delete_10_logs():
+
+    logs_to_delete = list(log.find().sort("_id", -1).limit(10))
+    
+    if not logs_to_delete:
+        print("Không có log nào để xóa.")
+        return 0
+
+    # Lấy danh sách ID của các log cần xóa
+    ids_to_delete = [log["_id"] for log in logs_to_delete]
+
+    # Xóa các log theo ID
+    result = log.delete_many({"_id": {"$in": ids_to_delete}})
+
+    result.deleted_count
+
+
 def display_logs():
     
     logs = list(log.find().sort("timestamp", -1))  # Lấy log mới nhất trước
     logs_df = pd.DataFrame(logs)
     logs_df["timestamp"] = logs_df["timestamp"].apply(lambda x: x.strftime("%H:%M:%S %d-%m-%Y"))
     
-    col1, col2 = st.columns([8, 2])
+    col1, col2, col3 = st.columns([6, 2, 2])
     with col1:
         st.write("### Action Logs")
     with col2:
@@ -104,7 +121,13 @@ def display_logs():
             file_name="logs.csv",
             mime="text/csv"
         )
+    with col3:
+        if st.button("Delete 10 logs"):
+            delete_10_logs()
+            st.rerun()
+
     st.dataframe(logs_df[["timestamp", "user_email", "action", "details"]])
+
 
 st.title("This is checking log page")
 col1, col2 = st.columns(2)

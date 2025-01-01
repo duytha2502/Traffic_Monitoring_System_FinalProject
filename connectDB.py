@@ -13,7 +13,7 @@ def connect_to_mongo(db_name):
         fs: Đối tượng GridFS.
     """
     # Địa chỉ MongoDB Local
-    mongo_uri = "mongodb://localhost:27017/"
+    mongo_uri = st.secrets["mongo_uri"]
     
     # Kết nối tới MongoDB
     client = pymongo.MongoClient(mongo_uri)

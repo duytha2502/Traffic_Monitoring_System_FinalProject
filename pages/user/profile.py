@@ -1,7 +1,9 @@
 import streamlit as st
 import os
+import time
 from connectDB import *
 from uuid import uuid4
+from PIL import Image, ImageDraw
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -30,8 +32,27 @@ def save_uploaded_file(uploaded_file, folder="img"):
     with open(file_path, "wb") as f:
         f.write(uploaded_file.getbuffer())
     
-    return file_path
-
+     # Xử lý hình ảnh thành hình tròn
+    img = Image.open(file_path).convert("RGBA")  # Đảm bảo ảnh có kênh alpha
+    size = min(img.size)  # Lấy kích thước nhỏ nhất để tạo hình tròn
+    mask = Image.new("L", (size, size), 0)  # Mặt nạ (mask) hình tròn
+    draw = ImageDraw.Draw(mask)
+    draw.ellipse((0, 0, size, size), fill=255)  # Vẽ hình tròn trên mặt nạ
+    
+    # Cắt ảnh thành hình vuông và áp dụng mặt nạ
+    img_cropped = img.crop((0, 0, size, size))
+    img_cropped.putalpha(mask)  # Áp dụng mặt nạ
+    
+    # Lưu ảnh tròn
+    round_file_name = f"round_{uuid4()}.{file_extension}"
+    round_file_path = os.path.join(folder, round_file_name)
+    img_cropped.save(round_file_path, format="PNG")  # Lưu ảnh dưới dạng PNG để giữ kênh alpha
+    
+    # Xóa ảnh gốc nếu không cần
+    os.remove(file_path)
+    
+    return round_file_path
+    
 def update_avatar(user_email, uploaded_file):
 
     file_path = save_uploaded_file(uploaded_file)
@@ -80,8 +101,8 @@ def change_password_dialog(user_email):
             change_password(user_email, old_password, new_password)
         st.rerun()
 
-st.title("Profile Users")
-
+st.title(":newspaper: Profile Users")
+st.markdown("---")
 user_profile = get_user()
 
 # Tạo container để hiển thị giao diện
@@ -113,12 +134,20 @@ with st.container():
                 st.write(":green[**Active**]")
             else:   
                 st.write("Inactive")
-        uploaded_file = st.file_uploader("Choose an image to change avatar", type=["png", "jpg", "jpeg"])
-        if uploaded_file is not None:
-            update_avatar(st.session_state['email'], uploaded_file)
+        uploaded_file = st.file_uploader("Choose an image to change avatar", type=["png", "jpg", "jpeg"]) 
         # Nút Save Change
         submitted = st.form_submit_button("Save Change", use_container_width=True)
         if submitted:
-            st.success("Your profile has been updated!")
+            if uploaded_file is not None:
+                update_avatar(st.session_state['email'], uploaded_file)
+            new_data = {
+                "email": email,
+                "first_name": first_name,
+                "last_name": last_name,
+                "updated_time": datetime.now()
+            }
+            user.update_many({"email": email}, {"$set": new_data})
+            st.toast("Your profile has been updated!")
+            time.sleep(1)
             st.rerun()
 

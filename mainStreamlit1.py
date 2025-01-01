@@ -1,14 +1,16 @@
 import streamlit as st
 import pymongo
+import time
 from google_auth_oauthlib import get_user_credentials
 from google.auth.transport import requests
 from google.oauth2 import id_token
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
+from connectDB import *
 
-# Kết nối đến MongoDB
-client = pymongo.MongoClient("mongodb://localhost:27017/")
-db = client["processed_videos"]
+db, fs = connect_to_mongo("processed_videos")
+data = db["data"]
+log = db["logs"]
 users_collection = db["users"]
 
 st.markdown(
@@ -46,7 +48,7 @@ st.markdown(
 # Hàm tạo tài khoản (lưu mật khẩu đã mã hóa)
 def create_user(email, new_username_firstname ,new_username_lastname, password):
     password_hash = generate_password_hash(password)
-    new_user = users_collection.insert_one({"role": 1, "status": "inactive", "email": email, "first_name": new_username_firstname, "last_name": new_username_lastname ,"password": password_hash, "avatar": "img/avatar.png", "created_time": datetime.now(), "updated_time": datetime.now()})
+    new_user = users.insert_one({"role": 1, "status": "inactive", "email": email, "first_name": new_username_firstname, "last_name": new_username_lastname ,"password": password_hash, "avatar": "img/avatar.png", "created_time": datetime.now(), "updated_time": datetime.now()})
     get_new_user = users_collection.find_one({"_id": new_user.inserted_id})
     return get_new_user
 
@@ -84,6 +86,8 @@ def master():
                         st.rerun()
                     else: 
                         st.toast("Your account is currently inactive. Please contact the admin!")
+                        time.sleep(1)
+                        st.rerun()
                 else:
                     st.toast("Invalid email or password !")
         
@@ -122,7 +126,7 @@ if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if "register_message" in st.session_state:
-    st.toast("Registration successful")
+    st.toast("Registration successful", icon="✅")
     del st.session_state["register_message"] 
 
 if "show_success_message" in st.session_state:
