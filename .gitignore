@@ -7,3 +7,4 @@ runs/
 csv/
 training/
 captured_objects/
+.streamlit/
